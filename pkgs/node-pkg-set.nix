@@ -72,7 +72,7 @@
   }: let
     isWsRoot =
       ( pjs ? workspaces ) && ( ! ( ( pjs ? name ) || ( pjs ? version ) ) );
-    package  = if isWsRoot then [] else pkgEntFromPjs pjsDir pjs;
+    package  = if isWsRoot then [] else [( pkgEntFromPjs pjsDir pjs )];
     wsPaths  = lib.libpkginfo.workspacePackages pjsDir pjs;
     entForDir = d: pkgEntFromPjs d ( lib.importJSON' "${d}/package.json" );
     wsEnts = map entForDir wsPaths;
@@ -457,6 +457,25 @@
   in basics.__extend buildersOv;
 
 */
+
+
+/* -------------------------------------------------------------------------- */
+
+  # These are most useful for `package.json' entries where we may actually
+  # need to perform resolution; they are not very useful for package sets
+  # based on lock files - unless you are composing multiple locks.
+  addNormalizedDepsToMeta = { version, entries, ... } @ meta: let
+    fromEnt = entries.pl2ent or entries.pjs or entries.manifest or
+      entries.packument.versions.${version} or
+      ( throw "Cannot find an entry to lookup dependencies." );
+    norm = lib.libpkginfo.normalizedDepsAll fromEnt;
+    updated  = lib.recursiveUpdate meta.depInfo norm;
+    depInfo = if meta ? depInfo then updated
+                                else ( norm // { __serial = false;  } );
+  in meta.__update { inherit depInfo; };
+
+  addNormalizedDepsToEnt = { meta, ... } @ ent:
+    ent.__update { meta = addNormalizedDepsToMeta meta; };
 
 
 /* -------------------------------------------------------------------------- */
