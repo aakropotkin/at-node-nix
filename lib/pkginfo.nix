@@ -213,23 +213,27 @@ let
 /* -------------------------------------------------------------------------- */
 
   processWorkspacePath = p: let
-    reportDir = d:
-      if ( dirHasPackageJson d ) then "${d}/package.json" else null;
+    #reportDir = d:
+    #  if ( dirHasPackageJson d ) then "${d}/package.json" else null;
     dirs = if ( hasSingleGlob p ) then ( listSubdirs ( dirOf p ) )
            else if ( hasDoubleGlob p ) then ( listDirsRecursive ( dirOf p ) )
            else [p];
-    process = dirs: builtins.filter ( x: x != null ) ( map reportDir dirs );
+    process = dirs: builtins.filter ( x: x != null ) dirs; #( map reportDir dirs );
   in if ( ! ( hasGlob ( dirOf p ) ) ) then ( process dirs ) else
     ( throw ( "processGlobEnd: Only globs at the end of paths are " +
               "handled! Cannot process: ${p}" ) );
 
-  workspacePackages = dir: pkgInfo:
-    if ! ( pkgInfo ? workspaces.packages ) then [] else
-      let processPath = p: processWorkspacePath ( ( toString dir ) + "/${p}" );
-      in builtins.concatLists ( map processPath pkgInfo.workspaces.packages );
+  workspacePackages = dir: pkgInfo: let
+    packages = pkgInfo.workspaces.packages or pkgInfo.workspaces or [];
+    processPath = p: processWorkspacePath ( ( toString dir ) + "/${p}" );
+  in builtins.concatLists ( map processPath packages );
 
   readWorkspacePackages = p: let pjp = pkgJsonForPath p; in
     workspacePackages ( dirOf pjp ) ( importJSON' pjp );
+
+  normalizeWorkspaces = dir: pjs:
+    if ! ( pjs ? workspaces ) then [] else
+       map ( lib.libpath.realpathRel dir ) ( workspacePackages dir pjs );
 
 
 /* -------------------------------------------------------------------------- */
@@ -347,7 +351,6 @@ let
   in assert verifyFields; assert verifyResolves; rewritten;
 
 
-
 /* -------------------------------------------------------------------------- */
 
   # This isn't necessarily the perfect place for this function; but it will
@@ -375,23 +378,33 @@ let
 in {
   #inherit canonicalizePkgName unCanonicalizePkgName;
   inherit
-    parsePkgJsonNameField
-    normalizePkgScope
-    asLocalTarballName
-    asNpmRegistryTarballName
-    mkPkgInfo
-    workspacePackages
-    readWorkspacePackages
     importJSON'
-    pkgJsonForPath
-    pkgJsonFromPath
-    getPkgJson
+    mkPkgInfo
     pkgJsonHasBin
     rewriteDescriptors
     hasInstallScript
-    node2nixName
   ;
-
+  # `package.json' locators
+  inherit
+    pkgJsonForPath
+    pkgJsonFromPath
+    getPkgJson
+  ;
+  # Names
+  inherit
+    parsePkgJsonNameField
+    node2nixName
+    normalizePkgScope
+    asLocalTarballName
+    asNpmRegistryTarballName
+  ;
+  # Workspaces
+  inherit
+    workspacePackages
+    readWorkspacePackages
+    normalizeWorkspaces
+  ;
+  # Deps
   inherit
     allDepFields
     depMetaFields

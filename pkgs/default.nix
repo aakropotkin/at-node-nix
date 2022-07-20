@@ -155,8 +155,10 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
   ;
 
   inherit (_node-pkg-set)
+    pkgEntFromPjs
+    pkgEntriesFromPjs
     pkgEntFromPlockV2
-    pkgSetFromPlockV2
+    pkgEntriesFromPlockV2
   ;
 
 } )

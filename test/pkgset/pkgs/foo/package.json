@@ -13,5 +13,8 @@
     "@datadog/pprof": "^0.3.0",
     "libpq": "^1.8.9",
     "re2": "^1.17.7"
+  },
+  "devDependencies": {
+    "quickjs-emscripten": "https://github.com/tulip/quickjs-emscripten#aameen.npm.nix"
   }
 }

@@ -102,6 +102,12 @@
           preferBuiltins = true;
         };
       };
+      inherit (final._node-pkg-set)
+        pkgEntFromPjs
+        pkgEntriesFromPjs
+        pkgEntFromPlockV2
+        pkgEntriesFromPlockV2
+      ;
 
       genericInstall = import ./pkgs/build-support/genericInstall.nix {
         inherit (final) lib buildGyp evalScripts nodejs;
@@ -259,8 +265,10 @@
 
       # FIXME: this interface for handling `nodejs' input is hideous
       inherit (_node-pkg-set)
+        pkgEntFromPjs
+        pkgEntriesFromPjs
         pkgEntFromPlockV2
-        pkgSetFromPlockV2
+        pkgEntriesFromPlockV2
       ;
 
       inherit (_mkNodeTarball)

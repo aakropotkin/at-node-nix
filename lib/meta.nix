@@ -90,8 +90,12 @@
   #      This simply means ignoring `v ? __serial && v.__serial == serialIgnore'
   #      attrset values in an object ( see `serialDefault' `keepAttrs' ).
 
+  extInfoExtras = [
+    "__update" "__add" "__extend" "__apply" "__serial" "__entries" "__unfix__"
+    "__new"
+  ];
   # The simplest type of serializer.
-  serialAsIs   = self: removeAttrs self ["__serial" "__extend" "passthru"];
+  serialAsIs   = self: removeAttrs self ( extInfoExtras ++ ["passthru"] );
   # Do not serialize attrsets with this serializer, you must explicitly check
   # for this reserved serializer.
   # See notes in section above.
@@ -131,64 +135,72 @@
 /* -------------------------------------------------------------------------- */
 
   # Make an extensible attrset with functors `__extend', `__entries', and
-  # `__serial' which are intended to create a common interface for handling
+  # `__serial', etc which are intended to create a common interface for handling
   # various sorts of package info.
+  # This is based on Nixpkgs' `makeScope' pattern, which is essentially just a
+  # fancy fixed point attrset with a set of "OOP-ish" member functions.
+  # We use the pattern for a different purpose, but eagle eyed readers might
+  # already see how this object could be used for scope splicing.
+  #
   # `__extend` allow you to apply overlays to add new fields in a fixed point,
   # and is identical to the `nixpkgs.lib.extends' "overlay" function.
+  #
   # `__entries' scrubs any "non-entry" fields which is useful for mapping over
   # "real" entries to avoid processing meta fields.
+  # You may pass in your own definition to hide additional fields; when doing so
+  # I strongly recommend using `extInfoExtras' as a base list of fields to
+  # always exclude.
+  #
   # `__serial' scrubs any entries or fields of those entries which should not
   # be written to disk in the even that entries are serialized with a function
   # such as `toJSON' - it is recommended that you replace the default
   # implementation for this functor in most cases.
-  mkExtInfo = { serialFn ? serialDefault }: info: let
-    info' = self: info // {
-      __serial  = serialFn self;
-      __entries = lib.filterAttrs ( k: _: ! lib.hasPrefix "__" k ) self;
-    };
-    infoExt = lib.makeExtensibleWithCustomName "__extend" info';
-  in infoExt;
+  #
+  # `__update' may be used to add/set attributes to the attrset.
+  # The argument to `__update' may be a regular attrset, or a recursively
+  # defined attrset.
+  #
+  # `__add' is similar to `__update' except it will not overwrite defined fields,
+  # this is useful for bulk adding info while avoiding redundancy in evals.
+  #
+  # `__apply' passes fields from our attrset as arguments to a function which
+  # accepts an attrset of named fields as its argument.
+  # This is literally just `callPackageWith' and is provided for convenience,
+  # this does not modify our attrset in any way.
+  #
+  # `__unfix__' holds the original argument `info' as a recursively defined
+  # attrset ( see `infoR' definition ) which is useful for "deep" overrides.
+  # It's unlikely that you'll ever use this yourself, but it's a life saver
+  # for deeply nested/complex overrides - so it's here as an escape hatch.
+  #
+  # `__new' recreates our attrset providing the opportunity to add additional
+  # "extra" fields.
+  #
+  # `extra' fields are simply functors, which will be regenerated any time
+  # the attrset is modified.
+  # You are welcome to override these, but pay attention to the application of
+  # `self', and how this differs slightly from the default values defined
+  # below ( `extra' functors must accept `self' as their first argument ).
+  mkExtInfo' = {
+    __serial  ? serialDefault
+  , __entries ? self:
+      removeAttrs self ( extInfoExtras ++ ( builtins.attrNames extra ) )
+  , ...
+  } @ extra: info: let
+    infoR = if builtins.isFunction info then info else ( final: info );
+    self = ( infoR self ) // {
+      __update   = info': mkExtInfo' extra ( self // info' );
+      __add      = info': mkExtInfo' extra ( info' // self );
+      __extend   = ov: mkExtInfo' extra ( lib.fixedPoints.extends ov infoR );
+      __apply    = lib.callPackageWith self.__entries;
+      __serial   = __serial self;
+      __entries  = __entries self;
+      __unfix__  = infoR;
+      __new      = extra': mkExtInfo' ( extra // extra' ) self.__unfix__;
+    } // ( builtins.mapAttrs ( _: fn: fn self ) extra );
+  in self;
 
-
-/* -------------------------------------------------------------------------- */
-
-  ### FIXME
-  ### Merge two extensible info attrsets by recursively merging/updating members.
-  ### Both attrsets must be extensible.
-  ### This will attempt to compose `__extend' routines both at the top level and
-  ### in sub-attrsets.
-  ##mergeExtInfo = f: g: let
-  ##  inherit (builtins) isAttrs intersectAttrs mapAttrs isFunction;
-  ##  mergeAttr = k: gv: let
-  ##    ext = let
-  ##      gOvA = final: gv.__unfix__ or ( prev: gv );
-  ##      gOvF = if isFunction ( gv {} ) then gv else ( prev: gv );
-  ##      gOv  = if isAttrs gv then gOvA else gOvF;
-  ##    in if gv ? __extend then mergeExtInfo f.${k} gv else
-  ##       f.${k}.__extend gOv;
-  ##    reg = if ( isAttrs gv ) && ( f ? ${k} )
-  ##          then lib.recursiveUpdate f.${k} gv
-  ##          else gv;
-  ##    isExt = ( isFunction gv ) || ( f ? ${k}.__extend );
-  ##  in if isExt then ext else reg;
-  ##  ext = mapAttrs mergeAttr ( intersectAttrs f g );
-  ##in f.__extend ext;
-
-
-/* -------------------------------------------------------------------------- */
-
-  # XXX: Non-recursive
-  updateAttrsE = lattrs: rattrs: let
-    anyExtensible  = ( lattrs ? __extend ) || ( rattrs ? __extend );
-    bothExtensible = ( lattrs ? __extend ) && ( rattrs ? __extend );
-    extL = lattrs.__extend ( final: prev: rattrs );
-    extR = rattrs.__extend ( final: prev:
-      lib.filterAttrs ( k: _: ! prev ? ${k} ) lattrs
-    );
-    fromSingleExt = if ( lattrs ? __extend ) then extL else extR;
-    fromBothExt = lattrs.__extend ( final: prev: rattrs.__entries );
-    mergeExtensibles = if bothExtensible then fromBothExt else fromSingleExt;
-  in if anyExtensible then mergeExtensibles else ( lattrs // rattrs );
+  mkExtInfo = mkExtInfo' {};
 
 
 /* -------------------------------------------------------------------------- */
@@ -209,10 +221,9 @@
   , ident   ? dirOf args.key
   , version ? baseNameOf args.key
   } @ args: let
-    em = mkExtInfo {} {
+    em = mkExtInfo {
       inherit key ident version;
       entries.__serial = false;
-      __type = "ext:meta";
     };
     addNames = final: prev: {
       scoped = ( builtins.substring 0 1 prev.ident ) == "@";
@@ -243,6 +254,6 @@
 
 in {
   inherit serialAsIs serialIgnore serialDrop serialDefault;
-  inherit mkExtInfo /* mergeExtInfo */ updateAttrsE;
+  inherit extInfoExtras mkExtInfo' mkExtInfo;
   inherit metaCore;
 }
