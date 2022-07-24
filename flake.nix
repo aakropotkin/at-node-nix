@@ -93,7 +93,7 @@
 
       _node-pkg-set = import ./pkgs/node-pkg-set.nix {
         inherit (final) lib evalScripts buildGyp nodejs linkModules;
-        inherit (final) runBuild genericInstall;
+        inherit (final) runBuild genericInstall packNodeTarballAsIs;
         inherit (pkgsFor) stdenv jq xcbuild linkFarm;
         inherit (final._fetcher) typeOfEntry;
         fetchurl = final.lib.fetchurlDrv;  # For tarballs without unpacking
@@ -105,8 +105,15 @@
       inherit (final._node-pkg-set)
         pkgEntFromPjs
         pkgEntriesFromPjs
+
         pkgEntFromPlockV2
         pkgEntriesFromPlockV2
+
+        extendEntWithTarball
+        extendEntAddTarball
+
+        extendEntWithBuilt
+        extendEntAddBuilt
       ;
 
       genericInstall = import ./pkgs/build-support/genericInstall.nix {
@@ -221,6 +228,7 @@
       _node-pkg-set = import ./pkgs/node-pkg-set.nix {
         inherit lib evalScripts buildGyp linkModules genericInstall;
         inherit runBuild;
+        inherit (_mkNodeTarball) packNodeTarballAsIs;
         inherit (nixpkgs.legacyPackages.${system}) stdenv jq xcbuild linkFarm;
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
         inherit (_fetcher) typeOfEntry;
@@ -267,8 +275,15 @@
       inherit (_node-pkg-set)
         pkgEntFromPjs
         pkgEntriesFromPjs
+
         pkgEntFromPlockV2
         pkgEntriesFromPlockV2
+
+        extendEntWithTarball
+        extendEntAddTarball
+
+        extendEntWithBuilt
+        extendEntAddBuilt
       ;
 
       inherit (_mkNodeTarball)

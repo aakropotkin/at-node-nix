@@ -16,7 +16,9 @@
   , stdenv            ? globalAttrs.stdenv
   , buildInputs       ? []
   , nativeBuildInputs ? []  # `nodejs' and `jq' are added unconditionally
-  , runPrePublish     ? ( args ? entType ) && ( args.entType != "git" )
+  , entType           ? args.entType or meta.entSubtype
+  , runPrePublish     ? ( ( args ? entType ) || ( meta ? entSubtype ) ) &&
+                        ( entType != "git" )
   , ...
   } @ args: let
     evalScriptArgs = removeAttrs args ["runScripts runPrePublish"];
@@ -40,4 +42,4 @@
     ] ++ ( lib.optional runPrePublish "prepublish" );
   } // evalScriptArgs );
 
-in runBuild
+in lib.makeOverridable runBuild

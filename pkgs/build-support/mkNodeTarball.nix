@@ -3,7 +3,14 @@
  * This is going to take the cream of the crop, and then
  * the old ones will be deleted.
  */
-{ lib, linkToPath, linkFarm, untar, pacotecli, /* tar, */ ... }: let
+{ lib
+, linkToPath
+, linkFarm
+, untar
+, pacotecli
+# , tar
+, ...
+}: let
 
   inherit (lib.libpkginfo) readPkgInfo;
   inherit (builtins) mapAttrs attrValues attrNames filter;
@@ -49,10 +56,21 @@
   # FIXME: This is an ideal place to add `pkgInfo' as `meta'.
   # FIXME: Read `files' and ignores hints from `package.json'.
   packNodeTarballAsIs = {
-    src
-  , pjs  ? readPkgInfo src
-  , name ? pjs.registryTarballName
-  }: let
+    src     ? attrs.built or attrs.source
+  , name    ? meta.names.registryTarball
+  , ident   ? meta.ident
+  , version ? meta.version or src.version
+  , meta    ? src.meta or lib.libmeta.metaCore { inherit ident version; }
+  , simple  ? false  # Prevents processing of `meta' - just pack. Name required.
+  , built   ? attrs.built or source
+  , source  ? throw "You gotta give me something to work with here"
+  , ...
+  } @ attrs: let
+    tarball = pacotecli "tarball" { dest = name; spec = toString src; };
+    passthru = { inherit src tarball; } // ( tarball.passthru or {} );
+  in tarball //
+     ( if simple then { inherit passthru; } else { inherit meta passthru; } );
+
     #tarball  = tar {
     #  inherit name;
     #  tarFlagsLate = [
@@ -63,21 +81,6 @@
     #  ];
     #  src = ".";
     #};
-    tarball = pacotecli "tarball" {
-      dest = name;
-      spec = toString src;
-    };
-    meta = ( src.meta or {} ) // {
-      inherit (pjs) version;
-      inherit pjs;
-      # FIXME: You're note scraping the `manifest' data.
-      # SHA512 is the one you may need.
-      # Other manifest data contains store paths, so it would belong
-      # in passthru.
-      manifest = { integrity = ""; };
-    };
-    passthru = { inherit src tarball; } // ( tarball.passthru or {} );
-  in tarball // { inherit meta passthru; };
 
 
 /* -------------------------------------------------------------------------- */

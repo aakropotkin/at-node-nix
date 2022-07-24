@@ -12,6 +12,7 @@
 , xcbuild
 , nodejs
 , jq
+, packNodeTarballAsIs
 #, newScope  # nixpkgs.legacyPackages.${system}.newScope
 , ...
 } @ globalAttrs: let
@@ -64,37 +65,9 @@
 
 /* -------------------------------------------------------------------------- */
 
-  # Only processes workspaces
-  pkgEntriesFromPjs' = {
-    pjs     ? lib.importJSON' pjsPath
-  , pjsDir  ? dirOf pjsPath
-  , pjsPath ? "${pjsDir}/package.json"
-  }: let
-    isWsRoot =
-      ( pjs ? workspaces ) && ( ! ( ( pjs ? name ) || ( pjs ? version ) ) );
-    package  = if isWsRoot then [] else [( pkgEntFromPjs pjsDir pjs )];
-    wsPaths  = lib.libpkginfo.workspacePackages pjsDir pjs;
-    entForDir = d: pkgEntFromPjs d ( lib.importJSON' "${d}/package.json" );
-    wsEnts = map entForDir wsPaths;
-    packages = builtins.genericClosure {
-      startSet = package ++ wsEnts;
-      operator = item: let
-        pjsDir'  = item.meta.entries.pjs.pjsDir;
-        pjs'     = item.meta.entries.pjs;
-        wsPaths' = lib.libpkginfo.workspacePackages pjsDir' pjs';
-        wsEnts'  = map entForDir wsPaths';
-      in wsEnts';
-    };
-  in builtins.foldl' ( acc: v: acc // { ${v.key} = v; } ) {} packages;
-
-  pkgEntriesFromPjs = {
-    pjs     ? lib.importJSON' pjsPath
-  , pjsDir  ? dirOf pjsPath
-  , pjsPath ? "${pjsDir}/package.json"
-  } @ args: let
-    wsEntries = pkgEntriesFromPjs' args;
-  in wsEntries;
-
+  # `package.json' -> entry.
+  # No resolution is attempted.
+  # No workspaces are processed ( see `pkgEntriesFromPjs' for that ).
   pkgEntFromPjs = pjsDir: {
     version ? "0.0.0-null"
   , ident   ? pjent.name or "@name-undeclared/${baseNameOf pjsDir}"
@@ -141,6 +114,48 @@
     } ) );
   in mkExtInfo { inherit key ident version meta source; };
 
+
+/* -------------------------------------------------------------------------- */
+
+  # `package.json' -> entries.
+  # Processes workspaces, but no resolution is attempted.
+  pkgEntriesFromPjs' = {
+    pjs     ? lib.importJSON' pjsPath
+  , pjsDir  ? dirOf pjsPath
+  , pjsPath ? "${pjsDir}/package.json"
+  }: let
+    isWsRoot =
+      ( pjs ? workspaces ) && ( ! ( ( pjs ? name ) || ( pjs ? version ) ) );
+    package  = if isWsRoot then [] else [( pkgEntFromPjs pjsDir pjs )];
+    wsPaths  = lib.libpkginfo.workspacePackages pjsDir pjs;
+    entForDir = d: pkgEntFromPjs d ( lib.importJSON' "${d}/package.json" );
+    wsEnts = map entForDir wsPaths;
+    packages = builtins.genericClosure {
+      startSet = package ++ wsEnts;
+      operator = item: let
+        pjsDir'  = item.meta.entries.pjs.pjsDir;
+        pjs'     = item.meta.entries.pjs;
+        wsPaths' = lib.libpkginfo.workspacePackages pjsDir' pjs';
+        wsEnts'  = map entForDir wsPaths';
+      in wsEnts';
+    };
+  in builtins.foldl' ( acc: v: acc // { ${v.key} = v; } ) {} packages;
+
+  # `package.json' -> entries.
+  # The "root project" is indicated using the attr `__rootKey'.
+  #
+  # FIXME: Resolve deps from `wsEntries' and fallback to registry?
+  #        This might make more sense in a later overlay instead though.
+  pkgEntriesFromPjs = {
+    pjs     ? lib.importJSON' pjsPath
+  , pjsDir  ? dirOf pjsPath
+  , pjsPath ? "${pjsDir}/package.json"
+  } @ args: let
+    isWsRoot =
+      ( pjs ? workspaces ) && ( ! ( ( pjs ? name ) || ( pjs ? version ) ) );
+    wsEntries = pkgEntriesFromPjs' args;
+    __rootKey = "${pjs.name}/${pjs.version}";
+  in wsEntries // ( lib.optionalAttrs isWsRoot { inherit __rootKey; } );
 
 /* -------------------------------------------------------------------------- */
 
@@ -250,6 +265,65 @@
     kents = let inherit (builtins) listToAttrs mapAttrs attrValues; in
       listToAttrs ( attrValues ( mapAttrs toKEnt pl2ents ) );
   in kents;
+
+
+/* -------------------------------------------------------------------------- */
+
+  # Overwrites any existing def
+  extendEntWithTarball = ent: ent.__extend ( final: prev: {
+    tarball = final.__apply packNodeTarballAsIs {};
+  } );
+
+  extendEntAddTarball = ent: ent.__extend ( final: prev: {
+    tarball = prev.tarball or ( final.__apply packNodeTarballAsIs {} );
+  } );
+
+
+/* -------------------------------------------------------------------------- */
+
+  # FIXME: move to `buildGyp' and change arg handler there.
+  buildEnt = {
+    src     ? source
+  , name    ? meta.names.built
+  , ident   ? meta.ident
+  , version ? meta.version or src.version
+  , meta    ? src.meta or lib.libmeta.metaCore { inherit ident version; }
+  , simple  ? false  # Prevents processing of `meta' - just pack. Name required.
+  , source  ? throw "You gotta give me something to work with here"
+  , nodejs  ? globalAttrs.nodejs
+  , jq      ? globalAttrs.jq
+  , stdenv  ? globalAttrs.stdenv
+  , nodeModulesDir-dev
+  , ...
+  } @ attrs: let
+    built = runBuild ( {
+      inherit src name ident version meta;
+      inherit nodejs jq stdenv;
+      nodeModules = nodeModulesDir-dev;
+    } // ( removeAttrs attrs ["simple" "__pscope"] ) );
+    passthru = { inherit src built; } // ( built.passthru or {} );
+  in built //
+     ( if simple then { inherit passthru; } else { inherit meta passthru; } );
+
+
+  # XXX: `nodeModulesDir-dev' must be built in this layer overlays either by
+  # composition, or by a later override to `built'.`
+  extendEntWithBuilt = ent: ent.__extend ( final: prev: {
+    built = final.__apply buildEnt {
+      nodejs = final.__pscope.__pscope.nodejs or globalAttrs.nodejs;
+      jq     = final.__pscope.__pscope.jq or globalAttrs.jq;
+      stdenv = final.__pscope.__pscope.stdenv or globalAttrs.stdenv;
+    };
+  } );
+
+  extendEntAddBuilt = ent: ent.__extend ( final: prev: {
+    built = prev.built or final.__apply buildEnt {
+      nodejs = final.__pscope.__pscope.nodejs or globalAttrs.nodejs;
+      jq     = final.__pscope.__pscope.jq or globalAttrs.jq;
+      stdenv = final.__pscope.__pscope.stdenv or globalAttrs.stdenv;
+    };
+  } );
+
 
 
 /* -------------------------------------------------------------------------- */
@@ -497,8 +571,15 @@ in {
   inherit
     pkgEntFromPjs
     pkgEntriesFromPjs
+
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
+
+    extendEntWithTarball
+    extendEntAddTarball
+
+    extendEntWithBuilt
+    extendEntAddBuilt
   ;
 }
 

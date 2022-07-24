@@ -91,6 +91,7 @@
     inherit lib evalScripts buildGyp nodejs linkModules genericInstall runBuild;
     inherit (pkgs) stdenv jq xcbuild linkFarm;
     inherit (_fetcher) typeOfEntry;
+    inherit (_mkNodeTarball) packNodeTarballAsIs;
     fetchurl = lib.fetchurlDrv;  # For tarballs without unpacking
     doFetch = _fetcher.fetcher {
       cwd = throw "Override `cwd' to use local fetchers";  # defer to call-site
@@ -157,8 +158,15 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
   inherit (_node-pkg-set)
     pkgEntFromPjs
     pkgEntriesFromPjs
+
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
+
+    extendEntWithTarball
+    extendEntAddTarball
+
+    extendEntWithBuilt
+    extendEntAddBuilt
   ;
 
 } )
