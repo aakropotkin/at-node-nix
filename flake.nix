@@ -124,6 +124,10 @@
         extendEntWithInstalled
         extendEntAddInstalled
         extendPkgSetWithInstalls
+
+        extendEntWithPrepared
+        extendEntAddPrepared
+        extendPkgSetWithPrepares
       ;
 
       genericInstall = import ./pkgs/build-support/genericInstall.nix {
@@ -304,6 +308,10 @@
         extendEntWithInstalled
         extendEntAddInstalled
         extendPkgSetWithInstalls
+
+        extendEntWithPrepared
+        extendEntAddPrepared
+        extendPkgSetWithPrepares
       ;
 
       inherit (_mkNodeTarball)

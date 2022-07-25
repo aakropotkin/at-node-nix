@@ -77,7 +77,20 @@
     membersR = let
       core = {
         inherit (globalAttrs)
-          lib fetchurl linkFarm stdenv xcbuild nodejs jq doFetch linkModules;
+          lib
+          fetchurl
+          linkFarm
+          stdenv
+          xcbuild
+          nodejs
+          jq
+          doFetch
+          linkModules
+          runBuild
+          buildGyp
+          genericInstall
+          evalScripts
+        ;
       };
       addCore = prev: core // ( builtins.intersectAttrs core prev );
       withCoreOv = lib.fixedPoints.extends ( _: addCore ) members;
@@ -384,11 +397,13 @@
   , __pscope
   , ...
   } @ attrs: let
-    built = runBuild ( {
+    built = __pscope.__pscope.runBuild ( {
       inherit src name ident version meta;
       inherit (__pscope.__pscope) nodejs jq stdenv;
       nodeModules = nodeModulesDir-dev;
-    } // ( removeAttrs attrs ["simple" "__pscope" "source"] ) );
+    } // ( removeAttrs attrs [
+      "simple" "__pscope" "source" "nodeModulesDir-dev"
+    ] ) );
     passthru = { inherit src built; } // ( built.passthru or {} );
   in built //
      ( if simple then { inherit passthru; } else { inherit meta passthru; } );
@@ -405,11 +420,10 @@
   } );
 
   extendPkgSetWithBuilds = final: prev: let
-    setBuildFor = key: value: value.__extend extendEntWithBuilt;
     # XXX: This might need to be more discerning.
     shouldBuild = key: value: ( value.meta.hasBuild or true );
     packages = lib.filterAttrs shouldBuild ( removeAttrs prev ["__pscope"] );
-  in builtins.mapAttrs setBuildFor packages;
+  in builtins.mapAttrs ( _: extendEntWithBuilt ) packages;
 
 
 /* -------------------------------------------------------------------------- */
@@ -427,11 +441,13 @@
   , __pscope
   , ...
   } @ attrs: let
-    installed = genericInstall ( {
+    installed = __pscope.__pscope.genericInstall ( {
       inherit src name ident version meta;
       inherit (__pscope.__pscope) nodejs jq stdenv xcbuild;
       nodeModules = nodeModulesDir;
-    } // ( removeAttrs attrs ["simple" "__pscope" "built" "source"] ) );
+    } // ( removeAttrs attrs [
+      "simple" "__pscope" "built" "source" "nodeModulesDir"
+    ] ) );
     passthru = { inherit src installed; } // ( installed.passthru or {} );
   in installed //
      ( if simple then { inherit passthru; } else { inherit meta passthru; } );
@@ -445,15 +461,52 @@
   } );
 
   extendPkgSetWithInstalls = final: prev: let
-    setInstallFor = key: value: value.__extend extendEntWithInstalled;
     shouldInstall = key: value: ( value.meta.hasInstallScript or false );
     packages = lib.filterAttrs shouldInstall ( removeAttrs prev ["__pscope"] );
-  in builtins.mapAttrs setInstallFor packages;
+  in builtins.mapAttrs ( _: extendEntWithInstalled ) packages;
 
 
 /* -------------------------------------------------------------------------- */
 
+  prepareEnt = {
+    src       ? installed
+  , name      ? meta.names.prepared
+  , ident     ? meta.ident
+  , version   ? meta.version or src.version
+  , meta      ? src.meta or lib.libmeta.metaCore { inherit ident version; }
+  , simple    ? false  # Prevents processing of `meta' just pack. Name required.
+  , source    ? throw "You gotta give me something to work with here"
+  , built     ? source
+  , installed ? built
+  , nodeModulesDir
+  , __pscope
+  , ...
+  } @ attrs: let
+    hasPrepare = meta.hasPrepare or true;
+    prepared = evalScripts ( {
+      inherit src name ident version meta;
+      inherit (__pscope.__pscope) nodejs jq stdenv;
+      nodeModules = nodeModulesDir;
+      runScripts = ["preprepare" "prepare" "postprepare"];
+    } // ( removeAttrs attrs [
+      "simple" "__pscope" "installed" "built" "source" "nodeModulesDir"
+    ] ) );
+    passthru = { inherit src prepared; } // ( prepared.passthru or {} );
+    preparedByScript = prepared //
+     ( if simple then { inherit passthru; } else { inherit meta passthru; } );
+  in if hasPrepare then preparedByScript else src;
 
+  extendEntWithPrepared = ent: ent.__extend ( final: prev: {
+    prepared = final.__apply prepareEnt {};
+  } );
+
+  extendEntAddPrepared = ent: ent.__extend ( final: prev: {
+    prepared = prev.prepared or ( final.__apply prepareEnt {} );
+  } );
+
+  extendPkgSetWithPrepares = final: prev:
+    builtins.mapAttrs ( _: extendEntWithPrepared )
+                      ( removeAttrs prev ["__pscope"] );
 
 
 /* -------------------------------------------------------------------------- */
@@ -720,6 +773,10 @@ in {
     extendEntWithInstalled
     extendEntAddInstalled
     extendPkgSetWithInstalls
+
+    extendEntWithPrepared
+    extendEntAddPrepared
+    extendPkgSetWithPrepares
   ;
 }
 
