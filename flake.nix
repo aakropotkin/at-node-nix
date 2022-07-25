@@ -112,6 +112,8 @@
         pkgEntFromPlockV2
         pkgEntriesFromPlockV2
 
+        extendPkgSetWithNodeModulesDirs
+
         extendEntWithTarball
         extendEntAddTarball
 
@@ -284,6 +286,8 @@
 
         pkgEntFromPlockV2
         pkgEntriesFromPlockV2
+
+        extendPkgSetWithNodeModulesDirs
 
         extendEntWithTarball
         extendEntAddTarball

@@ -165,6 +165,8 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
 
+    extendPkgSetWithNodeModulesDirs
+
     extendEntWithTarball
     extendEntAddTarball
 

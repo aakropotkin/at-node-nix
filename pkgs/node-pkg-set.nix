@@ -77,7 +77,7 @@
     membersR = let
       core = {
         inherit (globalAttrs)
-          lib fetchurl linkFarm stdenv xcbuild nodejs jq doFetch;
+          lib fetchurl linkFarm stdenv xcbuild nodejs jq doFetch linkModules;
       };
       addCore = prev: core // ( builtins.intersectAttrs core prev );
       withCoreOv = lib.fixedPoints.extends ( _: addCore ) members;
@@ -195,6 +195,7 @@
     __rootKey = "${pjs.name}/${pjs.version}";
   in wsEntries // ( lib.optionalAttrs isWsRoot { inherit __rootKey; } );
 
+
 /* -------------------------------------------------------------------------- */
 
   metaFromPlockV2 = lockDir: pkey: {
@@ -251,6 +252,9 @@
     ( lib.optionalAttrs hasBin { inherit (pl2ent) bin; } ) );
   in meta;
 
+
+/* -------------------------------------------------------------------------- */
+
   # v2 package locks normalize most fields, so for example, `bin' will always
   # be an attrset of name -> path, even if the original `project.json' wrote
   # `"bin": "./foo"' or `"direcories": { "bin": "./scripts" }'.
@@ -269,7 +273,7 @@
   } // ( lib.optionalAttrs ( meta.entrySubtype == "registry-tarball" ) {
     tarball = self.__pscope.__pscope.fetchurl {
       name = self.meta.names.registryTarball;
-      inherit (self.meta) url hash;
+      inherit (self.meta.sourceInfo) url hash;
       unpack = false;
     };
   } ) );
@@ -327,6 +331,38 @@
   extendEntAddTarball = ent: ent.__extend ( final: prev: {
     tarball = prev.tarball or ( final.__apply packNodeTarballAsIs {} );
   } );
+
+
+/* -------------------------------------------------------------------------- */
+
+  # XXX: This must be composed with the group of overlays which adds `prepared'.
+  extendPkgSetWithNodeModulesDirs = final: prev: let
+    allRtKeysFor = key: map ( { key }: key ) ( builtins.genericClosure {
+      startSet = [{ inherit key; }];
+      operator = d:
+        map ( key: { inherit key; } ) ( prev.${d.key}.meta.runtimeKeys or [] );
+    } );
+    modulesFor = key: let
+      modules = map ( k: final.${k}.module ) ( allRtKeysFor key );
+    in prev.__pscope.linkModules { inherit modules; };
+    allDevKeysFor = key: map ( { key }: key ) ( builtins.genericClosure {
+      startSet = ( map ( key: { inherit key; } ) prev.${key}.meta.devKeys ) ++
+                 [{ inherit key; }];
+      operator = d:
+        map ( key: { inherit key; } ) ( prev.${d.key}.meta.runtimeKeys or [] );
+    } );
+    rtModulesFor = key: let
+      modules = map ( k: final.${k}.module ) ( allRtKeysFor key );
+    in prev.__pscope.linkModules { inherit modules; };
+    devModulesFor = key: let
+      modules = map ( k: final.${k}.module ) ( allDevKeysFor key );
+    in prev.__pscope.linkModules { inherit modules; };
+    addModulesFor = key: value: value.__extend ( eFinal: ePrev: let
+      nmDev' = lib.optionalAttrs ( ( ePrev.meta.hasBuild or true ) != false ) {
+        nodeModulesDir-dev = devModulesFor key;
+      };
+    in { nodeModulesDir = rtModulesFor key; } // nmDev' );
+  in builtins.mapAttrs addModulesFor ( removeAttrs prev ["__pscope"] );
 
 
 /* -------------------------------------------------------------------------- */
@@ -627,6 +663,8 @@ in {
 
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
+
+    extendPkgSetWithNodeModulesDirs
 
     extendEntWithTarball
     extendEntAddTarball
