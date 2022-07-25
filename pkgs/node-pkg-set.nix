@@ -68,7 +68,7 @@
   makeOuterScope = members: let
     extra = {
       __serial = self: {
-        nodejs = "nixpkgs/nodejs-${lib.versions.major self.nodejs}_x";
+        nodejs = "nixpkgs/nodejs-${lib.versions.major self.nodejs.version}_x";
       } // ( lib.optionalAttrs ( self ? nodePkgs ) {
         nodePkgs = self.nodePkgs.__serial;
       } );
@@ -108,7 +108,8 @@
       addCore = prev: { __pscope = prev.__pscope or core.__pscope; };
       withCoreOv = lib.fixedPoints.extends ( final: addCore ) members;
     in if builtins.isFunction members then withCoreOv else ( core // members );
-  in lib.libmeta.mkExtInfo' extra membersR;
+    withoutDrvs = lib.libmeta.mkExtInfo' extra membersR;
+  in withoutDrvs.__extend pkgSetDrvsOverlay;
 
 
 /* -------------------------------------------------------------------------- */
@@ -234,8 +235,8 @@
       in ( entType != "registry-tarball" ) && checkScripts;
     };
 
-    hasPrepare' = lib.optionalAttrs localPath {
-      hasPrepare = ( pjs ? scripts ) && (
+    hasPrepare' = lib.optionalAttrs ( entType != "git") {
+      hasPrepare = ( entType != "registry-tarball" ) && ( pjs ? scripts ) && (
         ( pjs ? scripts.preprepare ) ||
         ( pjs ? scripts.prepare ) ||
         ( pjs ? scripts.postprepare )
@@ -301,9 +302,9 @@
   # XXX: If you expect any local fetchers to actually work you must
   # the argument `lockDir' or `lockPath'.
   pkgEntriesFromPlockV2 = {
-    plock     ? lib.importJSON' lockPath
-  , lockDir   ? dirOf lockPath
-  , lockPath  ? "${lockDir}/package-lock.json"
+    plock    ? lib.importJSON' lockPath
+  , lockDir  ? dirOf lockPath
+  , lockPath ? "${lockDir}/package-lock.json"
   }: let
     pl2ents = let
       mkMetaEnt = k: v:
@@ -340,6 +341,8 @@
 
 /* -------------------------------------------------------------------------- */
 
+  # FIXME: use `__pscope' here for `packNodeTarballAsIs'
+
   # Overwrites any existing def
   extendEntWithTarball = ent: ent.__extend ( final: prev: {
     tarball = final.__apply packNodeTarballAsIs {};
@@ -349,42 +352,46 @@
     tarball = prev.tarball or ( final.__apply packNodeTarballAsIs {} );
   } );
 
+  extendPkgSetAddTarballs = final: prev:
+    builtins.mapAttrs ( _: extendEntAddTarball )
+                      ( removeAttrs prev ["__pscope"] );
+
 
 /* -------------------------------------------------------------------------- */
 
   # XXX: This must be composed with the group of overlays which adds `prepared'.
   extendPkgSetWithNodeModulesDirs = final: prev: let
-    allRtKeysFor = key: map ( { key }: key ) ( builtins.genericClosure {
-      startSet = [{ inherit key; }];
-      operator = d:
-        map ( key: { inherit key; } ) ( prev.${d.key}.meta.runtimeKeys or [] );
-    } );
-    modulesFor = key: let
-      modules = map ( k: final.${k}.module ) ( allRtKeysFor key );
-    in prev.__pscope.linkModules { inherit modules; };
-    allDevKeysFor = key: map ( { key }: key ) ( builtins.genericClosure {
-      startSet = ( map ( key: { inherit key; } ) prev.${key}.meta.devKeys ) ++
-                 [{ inherit key; }];
-      operator = d:
-        map ( key: { inherit key; } ) ( prev.${d.key}.meta.runtimeKeys or [] );
-    } );
-    rtModulesFor = key: let
-      modules = map ( k: final.${k}.module ) ( allRtKeysFor key );
-    in prev.__pscope.linkModules { inherit modules; };
-    devModulesFor = key: let
-      modules = map ( k: final.${k}.module ) ( allDevKeysFor key );
-    in prev.__pscope.linkModules { inherit modules; };
-    setModulesFor = key: value: value.__extend ( eFinal: ePrev: let
-      nmDev' = lib.optionalAttrs ( ePrev.meta.hasBuild or true ) {
-        nodeModulesDir-dev = devModulesFor key;
+    s2k = key: { inherit key; };
+    k2s = { key, ... }: key;
+    setModulesFor = _: value: value.__extend ( eFinal: ePrev: let
+      rtKs    = map s2k ePrev.meta.runtimeDepKeys;
+      dKs     = rtKs ++ ( map s2k ePrev.meta.devDepKeys );
+      rtKsFor = k: map s2k final.${k}.meta.runtimeDepKeys;
+      allRtKs = builtins.genericClosure {
+        startSet = rtKs;
+        operator = { key, ... }: rtKsFor key;
       };
-    in { nodeModulesDir = rtModulesFor key; } // nmDev' );
+      justDKs = builtins.genericClosure {
+        startSet = dKs;
+        operator = { key, ... }: rtKsFor key;
+      };
+      allRtKeys  = map k2s allRtKs;
+      allDevKeys = lib.unique ( allRtKeys ++ ( map k2s justDKs ) );
+      k2MD = keys: prev.__pscope.linkModules {
+        modules = map ( k: final.${k}.module.outPath ) keys;
+      };
+    in {
+      inherit allRtKeys;
+      nodeModulesDir = k2MD allRtKeys;
+    } // ( lib.optionalAttrs ( ePrev.meta.hasBuild or true ) {
+      inherit allDevKeys;
+      nodeModulesDir-dev = k2MD allDevKeys;
+    } ) );
   in builtins.mapAttrs setModulesFor ( removeAttrs prev ["__pscope"] );
 
 
 /* -------------------------------------------------------------------------- */
 
-  # FIXME: move to `buildGyp' and change arg handler there.
   buildEnt = {
     src     ? source
   , name    ? meta.names.built
@@ -394,15 +401,19 @@
   , simple  ? false  # Prevents processing of `meta' - just pack. Name required.
   , source  ? throw "You gotta give me something to work with here"
   , nodeModulesDir-dev
+  , runBuild  ? __pscope.__pscope.runBuild or
+                __pscope.__pscope.__pscope.runBuild
+  , nodejs    ? __pscope.__pscope.nodejs or __pscope.__pscope.__pscope.nodejs
+  , jq        ? __pscope.__pscope.jq or __pscope.__pscope.__pscope.jq
+  , stdenv    ? __pscope.__pscope.stdenv or __pscope.__pscope.__pscope.stdenv
   , __pscope
   , ...
   } @ attrs: let
-    built = __pscope.__pscope.runBuild ( {
-      inherit src name ident version meta;
-      inherit (__pscope.__pscope) nodejs jq stdenv;
+    built = runBuild ( {
+      inherit src name ident version meta nodejs jq stdenv;
       nodeModules = nodeModulesDir-dev;
     } // ( removeAttrs attrs [
-      "simple" "__pscope" "source" "nodeModulesDir-dev"
+      "simple" "__pscope" "source" "nodeModulesDir-dev" "runBuild"
     ] ) );
     passthru = { inherit src built; } // ( built.passthru or {} );
   in built //
@@ -438,15 +449,20 @@
   , source  ? throw "You gotta give me something to work with here"
   , built   ? source
   , nodeModulesDir
+  , genericInstall ? __pscope.__pscope.genericInstall or
+                     __pscope.__pscope.__pscope.genericInstall
+  , nodejs  ? __pscope.__pscope.nodejs or __pscope.__pscope.__pscope.nodejs
+  , jq      ? __pscope.__pscope.jq or __pscope.__pscope.__pscope.jq
+  , stdenv  ? __pscope.__pscope.stdenv or __pscope.__pscope.__pscope.stdenv
+  , xcbuild ? __pscope.__pscope.xcbuild or __pscope.__pscope.__pscope.xcbuild
   , __pscope
   , ...
   } @ attrs: let
-    installed = __pscope.__pscope.genericInstall ( {
-      inherit src name ident version meta;
-      inherit (__pscope.__pscope) nodejs jq stdenv xcbuild;
+    installed = genericInstall ( {
+      inherit src name ident version meta nodejs jq stdenv xcbuild;
       nodeModules = nodeModulesDir;
     } // ( removeAttrs attrs [
-      "simple" "__pscope" "built" "source" "nodeModulesDir"
+      "simple" "__pscope" "built" "source" "nodeModulesDir" "genericInstall"
     ] ) );
     passthru = { inherit src installed; } // ( installed.passthru or {} );
   in installed //
@@ -479,17 +495,21 @@
   , built     ? source
   , installed ? built
   , nodeModulesDir
+  , evalScripts ? __pscope.__pscope.evalScripts or
+                  __pscope.__pscope.__pscope.evalScripts
+  , nodejs      ? __pscope.__pscope.nodejs or __pscope.__pscope.__pscope.nodejs
+  , jq          ? __pscope.__pscope.jq or __pscope.__pscope.__pscope.jq
   , __pscope
   , ...
   } @ attrs: let
-    hasPrepare = meta.hasPrepare or true;
+    hasPrepare = meta.hasPrepare or false;
     prepared = evalScripts ( {
-      inherit src name ident version meta;
-      inherit (__pscope.__pscope) nodejs jq stdenv;
+      inherit src name ident version meta nodejs jq stdenv;
       nodeModules = nodeModulesDir;
       runScripts = ["preprepare" "prepare" "postprepare"];
     } // ( removeAttrs attrs [
       "simple" "__pscope" "installed" "built" "source" "nodeModulesDir"
+      "evalScripts"
     ] ) );
     passthru = { inherit src prepared; } // ( prepared.passthru or {} );
     preparedByScript = prepared //
@@ -511,209 +531,36 @@
 
 /* -------------------------------------------------------------------------- */
 
-      # Add the full closure of `devDependency' keys to entries.
-      # The basic entry only lists direct `devDependency' keys at this point.
-      # This could technically be done earlier in the basic entry, but waiting
-      # until all of the runtime closure key lists are populated makes this a
-      # bit less ugly since we can just inherit them for the direct
-      # `devDependency' list to create the dev closure.
-      #withIndirectDevDepKeys = let
-      #  addDevKeysMetaOv = mFinal: mPrev: {
-      #    devDepKeys = let
-      #      rtdd = mPrev.runtimeDepKeys ++ mPrev.devDepKeys;
-      #      addIndirect = acc: dd: acc ++ kents.${dd}.meta.runtimeDepKeys;
-      #      indirects = builtins.foldl' addIndirect rtdd mPrev.devDepKeys;
-      #    in lib.unique indirects;
-      #  };
-      #  addDevKeysPlEnt = _: plent: plent.__extend ( peFinal: pePrev: {
-      #    meta = pePrev.meta.__extend addDevKeysMetaOv;
-      #  } );
-      #in builtins.mapAttrs addDevKeysPlEnt kents;
-    #in mkExtInfo withIndirectDevDepKeys;
+  # FIXME: support bundled deps.
+  modularizeEnt = {
+    prepared
+  , name     ? meta.names.module
+  , ident    ? meta.ident
+  , meta
+  , linkFarm ? __pscope.__pscope.linkFarm or __pscope.__pscope.__pscope.linkFarm
+  , __pscope
+  , ...
+  } @ attrs: let
+    binEnts = let
+      mkBins = bname: p: { name = ".bin/${bname}"; path = "${ident}/${p}"; };
+      fromBindir = [{ name = ".bin"; path = "${ident}/${meta.bin.__DIR__}"; }];
+    in if ( ! ( meta.hasBin or false ) ) then [] else
+       if meta.bin ? __DIR__ then fromBindir else
+       ( lib.mapAttrsToList mkBins meta.bin );
+    nmdir = [{ name = ident; path = prepared.outPath; }];
+  in __pscope.__pscope.__pscope.linkFarm name ( nmdir ++ binEnts );
 
-/*
+  extendEntWithModule = ent: ent.__extend ( final: prev: {
+    module = final.__apply modularizeEnt {};
+  } );
 
-    # Now that the runtime and dev dependency key lists are populated, we can
-    # create `node_modules/' derivations from those lists yanking modules from
-    # the package set.
-    # These derivations need to remain as unevaluated "thunks" until the
-    # `prepareOv' is actually applied, because the builders are still functions
-    # waiting to be passed the `final' ( "self" ) object to be realised.
-    injectNodeModulesDirsOv = final: prev: let
-      injectDepsFor = key: plent: let
-        nodeModulesDir = linkModules {
-          modules = let depKeys = plent.meta.runtimeDepKeys;
-          in map ( k: final.${k}.module.outPath ) depKeys;
-        };
-        nodeModulesDir-dev = linkModules {
-          modules = let depKeys = plent.meta.devDepKeys;
-          in map ( k: final.${k}.module.outPath ) depKeys;
-        };
-        mdd = lib.optionalAttrs ( plent.meta.hasBuild or false ) {
-          inherit nodeModulesDir-dev;
-        };
-      in plent // {
-        passthru = { inherit nodeModulesDir; } // mdd // plent.passthru;
-      };
-      # XXX: We cannot use `prev.__entries' inside of an overlay.
-      entries = lib.filterAttrs ( k: _: ! lib.hasPrefix "__" k ) prev;
-    in builtins.mapAttrs injectDepsFor entries;
+  extendEntAddModule = ent: ent.__extend ( final: prev: {
+    module = prev.module or ( final.__apply modularizeEnt {} );
+  } );
 
-    withNodeModulesDirs = extEnts.__extend injectNodeModulesDirsOv;
-
-    # Now we can actually evaluate ( realise ) the builds.
-    # We pass the `final' form of each package entry to the builders, allowing
-    # the fixed point to perform toposorting "magically" for us.
-    # It is still possible to override the builders after this point; but you
-    # will want to remember to override the `passthru' to keep them aligned with
-    # the real entries.
-    # TODO: `passthru' should be created as a final overlay to avoid
-    # ugly/tedious overrides like this.
-    prepareOv = final: prev: let
-      prepareFor = key: plent: let
-        built' = if ! ( plent ? built ) then {} else {
-          built = plent.built plent;
-        };
-        install' = if ! ( plent ? installed ) then {} else {
-          installed = plent.installed final.${key};
-        };
-        bin' = if ! ( plent ? bin ) then {} else {
-          bin = plent.bin final.${key};
-        };
-        prepared = plent.prepared final.${key};
-        global = plent.global final.${key};
-        module = plent.module final.${key};
-
-        mandatory = { inherit prepared global module; };
-        maybes = install' // built' // bin';
-
-        passthru = plent.passthru // mandatory // maybes;
-
-      in plent // { inherit passthru; } // mandatory // maybes;
-      # XXX: We cannot use `prev.__entries' inside of an overlay.
-      entries = lib.filterAttrs ( k: _: ! lib.hasPrefix "__" k ) prev;
-    in builtins.mapAttrs prepareFor entries;
-
-    # We're ready to roll y'all!
-  in withNodeModulesDirs.__extend prepareOv;
-*/
-
-/* -------------------------------------------------------------------------- */
-
-/*
-  pkgsetAddBuilt = { ... } @ pkgset: let
-    haveBuilds = lib.filterAttrs ( k: v: v.hasBuild or false ) pkgset;
-  in
-
-    # Assumed to be a git checkout or local tree.
-    # These do not run the `install' or `prepare' routines, since those are
-    # supposed to run after `install'.
-    built = self: if ! ( self.meta.hasBuild or false ) then null else
-      self.passthru.runBuild {
-        name = meta.names.built;
-        src = source;
-        inherit version;
-        inherit (self.passthru) nodejs jq;
-        # Both `dependencies' and `devDependencies' are available for this step.
-        # NOTE: `devDependencies' are NOT available during the
-        # `install'/`prepare'builder and you should consider how this effects
-        # both closures and any "non-standard" fixups you do a package.
-        nodeModules = self.passthru.nodeModulesDir-dev;
-        # NOTE: I know, "prepublish" I know.
-        # It is fucking evil, but you probably already knew that.
-        # `prepublish' actually isn't run for publishing or `git' checkouts
-        # which aim to mimick the creation of a published tarball.
-        # It only exists for backwards compatibility to support a handful of
-        # ancient registry tarballs.
-        runPrePublish = entType != "git";
-      };
-
-    installed = if ! hasInstallScript then null else self:
-      self.passthru.genericInstall {
-        name = self.meta.names.installed;
-        src = self.built or self.source;
-        nodeModules = self.passthru.nodeModulesDir;
-        inherit version;
-        inherit (self) meta;
-        inherit (self.passthru) nodejs jq xcbuild stdenv;
-      };
-
-    prepared = self: let
-      src = self.installed or self.built or self.source;
-      prep = self.passthru.evalScripts {
-        name = meta.names.prepared;
-        inherit version src;
-        nodeModules = self.passthru.nodeModulesDir;
-        runScripts = ["preprepare" "prepare" "postprepare"];
-        inherit (self.passthru) nodejs jq;
-      };
-    in if ! ( self.hasPrepare or false ) then src else prep;
-
-    mkBins = to: self: let
-      ftPair = n: p: {
-        name = if to != null then "${to}/${n}" else n;
-        path = "${self.prepared}/${p}";
-      };
-      binList = lib.mapAttrsToList ftPair pl2ent.bin;
-    in if ! hasBin then null else binList;
-
-    bin = if ! hasBin then null else
-      self: self.passthru.linkFarm meta.names.bin ( mkBins null self );
-
-    global = self: let
-      bindir = if hasBin then ( mkBins "bin" self ) else [];
-      gnmdir  = [{
-        name = "lib/node_modules/${ident}";
-        path = self.prepared.outPath;
-      }];
-    in self.passthru.linkFarm meta.names.global ( gnmdir ++ bindir );
-
-    module = self: let
-      bindir = if hasBin then ( mkBins ".bin" self ) else [];
-      lnmdir  = [{ name = ident; path = self.prepared.outPath; }];
-    in self.passthru.linkFarm meta.names.module ( lnmdir ++ bindir );
-
-    passthru = {
-      doFetch = doFetch';
-      inherit
-        lib
-        fetchurl
-        runBuild
-        buildGyp
-        evalScripts
-        genericInstall
-        linkFarm
-        stdenv  # ( for `isDarwin` )
-        xcbuild # ( Darwin only )
-        nodejs
-        jq
-        # nodeModulesDir      ( Must be added by "parent" package set )
-        # nodeModulesDir-dev  ( Must be added by "parent" package set )
-      ;
-    };
-
-    basics = let
-      ents = { inherit key ident version meta source passthru; } //
-             ( lib.optionalAttrs ( tarball != null ) { inherit tarball; } );
-    in mkExtInfo ents;
-
-    # XXX: These builders have not been "invoked", they are thunks which
-    # must be called with `final' in a later overlay after
-    # `nodeModulesDir[-dev]' fields have been added.
-    # We cannot do this now because we need the full package set to populate
-    # those field after resolution has been performed and derivations can be
-    # created/toposorted.
-    buildersOv = final: prev: let
-      # Optional drvs
-      mbuilt = lib.optionalAttrs prev.meta.hasBuild { inherit built; };
-      # FIXME: collect `installed.meta.gypfile' in impure mode.
-      minst  = lib.optionalAttrs ( installed != null ) { inherit installed; };
-      mbin   = lib.optionalAttrs ( bin != null ) { inherit bin; };
-    in { inherit prepared module global; } // mbuilt // minst // mbin;
-
-  in basics.__extend buildersOv;
-
-*/
+  extendPkgSetWithModules = final: prev:
+    builtins.mapAttrs ( _: extendEntWithModule )
+                      ( removeAttrs prev ["__pscope"] );
 
 
 /* -------------------------------------------------------------------------- */
@@ -733,6 +580,18 @@
 
   addNormalizedDepsToEnt = { meta, ... } @ ent:
     ent.__update { meta = addNormalizedDepsToMeta meta; };
+
+
+/* -------------------------------------------------------------------------- */
+
+  pkgSetDrvOverlays = [
+    extendPkgSetWithBuilds
+    extendPkgSetWithInstalls
+    extendPkgSetWithPrepares
+    extendPkgSetWithModules
+    extendPkgSetWithNodeModulesDirs
+  ];
+  pkgSetDrvsOverlay = lib.composeManyExtensions pkgSetDrvOverlays;
 
 
 /* -------------------------------------------------------------------------- */
@@ -758,6 +617,7 @@ in {
     pkgEntFromPjs
     pkgEntriesFromPjs
 
+    metaFromPlockV2
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
 
@@ -765,6 +625,7 @@ in {
 
     extendEntWithTarball
     extendEntAddTarball
+    extendPkgSetAddTarballs
 
     extendEntWithBuilt
     extendEntAddBuilt
@@ -777,6 +638,10 @@ in {
     extendEntWithPrepared
     extendEntAddPrepared
     extendPkgSetWithPrepares
+
+    extendEntWithModule
+    extendEntAddModule
+    extendPkgSetWithModules
   ;
 }
 

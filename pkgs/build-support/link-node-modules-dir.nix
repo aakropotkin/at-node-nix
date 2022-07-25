@@ -49,6 +49,7 @@ let
   linkModules = { modules ? [], fixup ? false }: runCommandNoCC "node_modules" {
       preferLocalBuild = true;
       allowSubstitutes = false;
+      inherit modules;
   } ( "mkdir -p $out\n" + ( strConcatMap ( link1 fixup ) modules ) );
 
 in linkModules

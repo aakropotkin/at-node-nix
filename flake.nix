@@ -116,6 +116,7 @@
 
         extendEntWithTarball
         extendEntAddTarball
+        extendPkgSetAddTarballs
 
         extendEntWithBuilt
         extendEntAddBuilt
@@ -128,6 +129,10 @@
         extendEntWithPrepared
         extendEntAddPrepared
         extendPkgSetWithPrepares
+
+        extendEntWithModule
+        extendEntAddModule
+        extendPkgSetWithModules
       ;
 
       genericInstall = import ./pkgs/build-support/genericInstall.nix {
@@ -300,6 +305,7 @@
 
         extendEntWithTarball
         extendEntAddTarball
+        extendPkgSetAddTarballs
 
         extendEntWithBuilt
         extendEntAddBuilt
@@ -312,6 +318,10 @@
         extendEntWithPrepared
         extendEntAddPrepared
         extendPkgSetWithPrepares
+
+        extendEntWithModule
+        extendEntAddModule
+        extendPkgSetWithModules
       ;
 
       inherit (_mkNodeTarball)

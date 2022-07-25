@@ -169,6 +169,7 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
 
     extendEntWithTarball
     extendEntAddTarball
+    extendPkgSetAddTarballs
 
     extendEntWithBuilt
     extendEntAddBuilt
@@ -181,6 +182,10 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
     extendEntWithPrepared
     extendEntAddPrepared
     extendPkgSetWithPrepares
+
+    extendEntWithModule
+    extendEntAddModule
+    extendPkgSetWithModules
   ;
 
 } )
