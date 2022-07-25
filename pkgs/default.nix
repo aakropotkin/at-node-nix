@@ -172,6 +172,11 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
 
     extendEntWithBuilt
     extendEntAddBuilt
+    extendPkgSetWithBuilds
+
+    extendEntWithInstalled
+    extendEntAddInstalled
+    extendPkgSetWithInstalls
   ;
 
 } )

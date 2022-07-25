@@ -210,6 +210,7 @@
     entType  = typeOfEntry pl2ent;
     localPath = ( entType == "path" ) || ( entType == "symlink" );
     pjs = assert localPath; lib.importJSON' "${lockDir}/${pkey}/package.json";
+
     hasBuild' = lib.optionalAttrs ( entType != "git" ) {
       hasBuild = let
         checkScripts = ( pjs ? scripts ) && (
@@ -219,6 +220,7 @@
         );
       in ( entType != "registry-tarball" ) && checkScripts;
     };
+
     hasPrepare' = lib.optionalAttrs localPath {
       hasPrepare = ( pjs ? scripts ) && (
         ( pjs ? scripts.preprepare ) ||
@@ -226,6 +228,7 @@
         ( pjs ? scripts.postprepare )
       );
     };
+
     sourceInfo = if localPath then {
       type = "path";
       path = let
@@ -238,6 +241,7 @@
     } // ( lib.optionalAttrs ( entType == "registry-tarball" ) {
       hash = pl2ent.integrity;
     } ) );
+
     meta = let
       core = metaCore { inherit ident version; };
     in core.__update ( {
@@ -357,12 +361,12 @@
     devModulesFor = key: let
       modules = map ( k: final.${k}.module ) ( allDevKeysFor key );
     in prev.__pscope.linkModules { inherit modules; };
-    addModulesFor = key: value: value.__extend ( eFinal: ePrev: let
-      nmDev' = lib.optionalAttrs ( ( ePrev.meta.hasBuild or true ) != false ) {
+    setModulesFor = key: value: value.__extend ( eFinal: ePrev: let
+      nmDev' = lib.optionalAttrs ( ePrev.meta.hasBuild or true ) {
         nodeModulesDir-dev = devModulesFor key;
       };
     in { nodeModulesDir = rtModulesFor key; } // nmDev' );
-  in builtins.mapAttrs addModulesFor ( removeAttrs prev ["__pscope"] );
+  in builtins.mapAttrs setModulesFor ( removeAttrs prev ["__pscope"] );
 
 
 /* -------------------------------------------------------------------------- */
@@ -376,17 +380,15 @@
   , meta    ? src.meta or lib.libmeta.metaCore { inherit ident version; }
   , simple  ? false  # Prevents processing of `meta' - just pack. Name required.
   , source  ? throw "You gotta give me something to work with here"
-  , nodejs  ? globalAttrs.nodejs
-  , jq      ? globalAttrs.jq
-  , stdenv  ? globalAttrs.stdenv
   , nodeModulesDir-dev
+  , __pscope
   , ...
   } @ attrs: let
     built = runBuild ( {
       inherit src name ident version meta;
-      inherit nodejs jq stdenv;
+      inherit (__pscope.__pscope) nodejs jq stdenv;
       nodeModules = nodeModulesDir-dev;
-    } // ( removeAttrs attrs ["simple" "__pscope"] ) );
+    } // ( removeAttrs attrs ["simple" "__pscope" "source"] ) );
     passthru = { inherit src built; } // ( built.passthru or {} );
   in built //
      ( if simple then { inherit passthru; } else { inherit meta passthru; } );
@@ -395,20 +397,62 @@
   # XXX: `nodeModulesDir-dev' must be built in this layer overlays either by
   # composition, or by a later override to `built'.`
   extendEntWithBuilt = ent: ent.__extend ( final: prev: {
-    built = final.__apply buildEnt {
-      nodejs = final.__pscope.__pscope.nodejs or globalAttrs.nodejs;
-      jq     = final.__pscope.__pscope.jq or globalAttrs.jq;
-      stdenv = final.__pscope.__pscope.stdenv or globalAttrs.stdenv;
-    };
+    built = final.__apply buildEnt {};
   } );
 
   extendEntAddBuilt = ent: ent.__extend ( final: prev: {
-    built = prev.built or final.__apply buildEnt {
-      nodejs = final.__pscope.__pscope.nodejs or globalAttrs.nodejs;
-      jq     = final.__pscope.__pscope.jq or globalAttrs.jq;
-      stdenv = final.__pscope.__pscope.stdenv or globalAttrs.stdenv;
-    };
+    built = prev.built or ( final.__apply buildEnt {} );
   } );
+
+  extendPkgSetWithBuilds = final: prev: let
+    setBuildFor = key: value: value.__extend extendEntWithBuilt;
+    # XXX: This might need to be more discerning.
+    shouldBuild = key: value: ( value.meta.hasBuild or true );
+    packages = lib.filterAttrs shouldBuild ( removeAttrs prev ["__pscope"] );
+  in builtins.mapAttrs setBuildFor packages;
+
+
+/* -------------------------------------------------------------------------- */
+
+  installEnt = {
+    src     ? built
+  , name    ? meta.names.installed
+  , ident   ? meta.ident
+  , version ? meta.version or src.version
+  , meta    ? src.meta or lib.libmeta.metaCore { inherit ident version; }
+  , simple  ? false  # Prevents processing of `meta' - just pack. Name required.
+  , source  ? throw "You gotta give me something to work with here"
+  , built   ? source
+  , nodeModulesDir
+  , __pscope
+  , ...
+  } @ attrs: let
+    installed = genericInstall ( {
+      inherit src name ident version meta;
+      inherit (__pscope.__pscope) nodejs jq stdenv xcbuild;
+      nodeModules = nodeModulesDir;
+    } // ( removeAttrs attrs ["simple" "__pscope" "built" "source"] ) );
+    passthru = { inherit src installed; } // ( installed.passthru or {} );
+  in installed //
+     ( if simple then { inherit passthru; } else { inherit meta passthru; } );
+
+  extendEntWithInstalled = ent: ent.__extend ( final: prev: {
+    installed = final.__apply installEnt {};
+  } );
+
+  extendEntAddInstalled = ent: ent.__extend ( final: prev: {
+    installed = prev.installed or ( final.__apply installEnt {} );
+  } );
+
+  extendPkgSetWithInstalls = final: prev: let
+    setInstallFor = key: value: value.__extend extendEntWithInstalled;
+    shouldInstall = key: value: ( value.meta.hasInstallScript or false );
+    packages = lib.filterAttrs shouldInstall ( removeAttrs prev ["__pscope"] );
+  in builtins.mapAttrs setInstallFor packages;
+
+
+/* -------------------------------------------------------------------------- */
+
 
 
 
@@ -671,6 +715,11 @@ in {
 
     extendEntWithBuilt
     extendEntAddBuilt
+    extendPkgSetWithBuilds
+
+    extendEntWithInstalled
+    extendEntAddInstalled
+    extendPkgSetWithInstalls
   ;
 }
 

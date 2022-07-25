@@ -195,11 +195,11 @@
     self = ( infoR self ) // {
       __update   = info': self.__new ( self // info' );
       __add      = info': self.__new ( info' // self );
-      __extend   = ov: self.__new ( lib.fixedPoints.extends ov infoR );
+      __extend   = ov: self.__new ( lib.fixedPoints.extends ov self.__unfix__ );
       __serial   = __serial self;
       __entries  = __entries self;
       __unfix__  = infoR;
-      __updateEx = extra': self.__new ( extra // extra' ) self.__unfix__;
+      __updateEx = extra': self.__new ( extra // extra' ) self;
       __new      = mkExtInfo' extra;
       __apply    = lib.callPackageWith ( self.__entries // {
         __pscope = self;
