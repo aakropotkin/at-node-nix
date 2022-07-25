@@ -103,6 +103,9 @@
         };
       };
       inherit (final._node-pkg-set)
+        makeOuterScope
+        makeNodePkgSet
+
         pkgEntFromPjs
         pkgEntriesFromPjs
 
@@ -273,6 +276,9 @@
 
       # FIXME: this interface for handling `nodejs' input is hideous
       inherit (_node-pkg-set)
+        makeOuterScope
+        makeNodePkgSet
+
         pkgEntFromPjs
         pkgEntriesFromPjs
 

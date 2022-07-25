@@ -92,7 +92,7 @@
 
   extInfoExtras = [
     "__update" "__add" "__extend" "__apply" "__serial" "__entries" "__unfix__"
-    "__new"
+    "__updateEx" "__new"
   ];
   # The simplest type of serializer.
   serialAsIs   = self: removeAttrs self ( extInfoExtras ++ ["passthru"] );
@@ -173,8 +173,12 @@
   # It's unlikely that you'll ever use this yourself, but it's a life saver
   # for deeply nested/complex overrides - so it's here as an escape hatch.
   #
-  # `__new' recreates our attrset providing the opportunity to add additional
-  # "extra" fields.
+  # `__updateEx' recreates our attrset providing the opportunity to add
+  # additional "extra" fields.
+  #
+  # `__new' allows `mkExtInfo'' to be used as a "base class" for creating
+  # other types of extensible attrsets based on the same interface.
+  # You can think of this like the "constructor".
   #
   # `extra' fields are simply functors, which will be regenerated any time
   # the attrset is modified.
@@ -189,14 +193,17 @@
   } @ extra: info: let
     infoR = if builtins.isFunction info then info else ( final: info );
     self = ( infoR self ) // {
-      __update   = info': mkExtInfo' extra ( self // info' );
-      __add      = info': mkExtInfo' extra ( info' // self );
-      __extend   = ov: mkExtInfo' extra ( lib.fixedPoints.extends ov infoR );
-      __apply    = lib.callPackageWith self.__entries;
+      __update   = info': self.__new ( self // info' );
+      __add      = info': self.__new ( info' // self );
+      __extend   = ov: self.__new ( lib.fixedPoints.extends ov infoR );
       __serial   = __serial self;
       __entries  = __entries self;
       __unfix__  = infoR;
-      __new      = extra': mkExtInfo' ( extra // extra' ) self.__unfix__;
+      __updateEx = extra': self.__new ( extra // extra' ) self.__unfix__;
+      __new      = mkExtInfo' extra;
+      __apply    = lib.callPackageWith ( self.__entries // {
+        __pscope = self;
+      } );
     } // ( builtins.mapAttrs ( _: fn: fn self ) extra );
   in self;
 

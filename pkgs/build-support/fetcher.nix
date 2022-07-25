@@ -1,10 +1,17 @@
 { lib
-, fetchurl
+, fetchurlDrv ? lib.fetchurlDrv
+, fetchurl  # The Nixpkgs implementation. Not the builtin.
 , fetchgit
 , fetchzip
 , impure ? ( builtins ? currentTime )
-}: let
-  inherit (builtins) fetchurl match toJSON head elemAt;
+} @ globalAttrs:
+
+  # The `typeOf' for `nixpkgs.fetchurl' is a `set', the builtin is a `lambda'.
+  assert builtins.typeOf fetchurl == "set";
+
+let
+
+  inherit (builtins) match toJSON head elemAt;
 
 
 /* -------------------------------------------------------------------------- */

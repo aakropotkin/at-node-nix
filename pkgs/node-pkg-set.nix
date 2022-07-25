@@ -1,7 +1,7 @@
 { lib
 , typeOfEntry
 , doFetch      # A configured `fetcher' from `./build-support/fetcher.nix'.
-, fetchurl    ? lib.fetchurlDrv
+, fetchurl       ? lib.fetchurlDrv
 , buildGyp
 , evalScripts
 , genericInstall
@@ -65,6 +65,41 @@
 
 /* -------------------------------------------------------------------------- */
 
+  makeOuterScope = members: let
+    extra = {
+      __serial = self: {
+        nodejs = "nixpkgs/nodejs-${lib.versions.major self.nodejs}_x";
+      } // ( lib.optionalAttrs ( self ? nodePkgs ) {
+        nodePkgs = self.nodePkgs.__serial;
+      } );
+      __new = self: lib.libmeta.mkExtInfo' extra;
+    };
+    membersR = let
+      core = {
+        inherit (globalAttrs)
+          lib fetchurl linkFarm stdenv xcbuild nodejs jq doFetch;
+      };
+      addCore = prev: core // ( builtins.intersectAttrs core prev );
+      withCoreOv = lib.fixedPoints.extends ( _: addCore ) members;
+    in if builtins.isFunction members then withCoreOv else ( core // members );
+  in lib.libmeta.mkExtInfo' extra membersR;
+
+
+  makeNodePkgSet = members: let
+    extra = {
+      __entries = self: removeAttrs self ( extInfoExtras ++ ["__pscope"] );
+      __new = self: lib.libmeta.mkExtInfo' extra;
+    };
+    membersR = let
+      core = { __pscope = makeOuterScope {}; };
+      addCore = prev: { __pscope = prev.__pscope or core.__pscope; };
+      withCoreOv = lib.fixedPoints.extends ( final: addCore ) members;
+    in if builtins.isFunction members then withCoreOv else ( core // members );
+  in lib.libmeta.mkExtInfo' extra membersR;
+
+
+/* -------------------------------------------------------------------------- */
+
   # `package.json' -> entry.
   # No resolution is attempted.
   # No workspaces are processed ( see `pkgEntriesFromPjs' for that ).
@@ -83,13 +118,15 @@
     ( pjent ? scripts.preprepare ) || ( pjent ? scripts.prepare ) ||
     ( pjent ? scripts.postprepare )
   , hasWorkspace ? pjent ? workspaces
+  , __pscope ? makeNodePkgSet {}
   , ...
   } @ pjent: let
     key = ident + "/" + version;
+    # FIXME:
     # We want to hit the `dirFetcher', we could invoke it directly, but we'll
     # stick to the "real interface" which will recognize the empty set as a
     # "path entry" ( it is based on `package-lock(v2)' style entries ).
-    source = ( globalAttrs.doFetch // { cwd = pjsDir; } ) "" {};
+    source = ( __pscope.__pscope.doFetch // { cwd = pjsDir; } ) "" {};
     bin = let
       # XXX: This is a reserved value.
       # It helps us avoid dynamically creating a list of bins at build time.
@@ -112,7 +149,7 @@
     // ( lib.optionalAttrs hasWorkspace {
       workspaces = lib.libpkginfo.normalizeWorkspaces pjent;
     } ) );
-  in mkExtInfo { inherit key ident version meta source; };
+  in mkExtInfo { inherit key ident version meta source __pscope; };
 
 
 /* -------------------------------------------------------------------------- */
@@ -139,7 +176,8 @@
         wsEnts'  = map entForDir wsPaths';
       in wsEnts';
     };
-  in builtins.foldl' ( acc: v: acc // { ${v.key} = v; } ) {} packages;
+    ents = builtins.foldl' ( acc: v: acc // { ${v.key} = v; } ) {} packages;
+  in ents;
 
   # `package.json' -> entries.
   # The "root project" is indicated using the attr `__rootKey'.
@@ -159,74 +197,82 @@
 
 /* -------------------------------------------------------------------------- */
 
-  # v2 package locks normalize most fields, so for example, `bin' will always
-  # be an attrset of name -> path, even if the original `project.json' wrote
-  # `"bin": "./foo"' or `"direcories": { "bin": "./scripts" }'.
-  pkgEntFromPlockV2 = lockDir: pkey: {
+  metaFromPlockV2 = lockDir: pkey: {
     version
   , hasInstallScript ? false
-  , hasBin ? ( pl2ent.bin or {} ) != {}
-  , ident  ? pl2ent.name or
-             ( lib.libstr.yank' ".*node_modules/((@[^@/]+/)?[^@/]+)" pkey )
+  , hasBin   ? ( pl2ent.bin or {} ) != {}
+  , ident    ? pl2ent.name or
+               ( lib.libstr.yank' ".*node_modules/((@[^@/]+/)?[^@/]+)" pkey )
   , ...
   } @ pl2ent: let
     key = ident + "/" + version;
     entType  = typeOfEntry pl2ent;
     localPath = ( entType == "path" ) || ( entType == "symlink" );
-    impure = builtins ? currentTime;
-    pjs = let
-      forPure = assert localPath;
-        lib.importJSON' "${lockDir}/${pkey}/package.json";
-      forImpure = let
-        pjsPath = if localPath then "${lockDir}/${pkey}/package.json"
-                               else "${source}/package.json";
-      in lib.importJSON' pjsPath;
-    in if impure then forImpure else forPure;
-    hasBuild = let
-      isRt  = entType == "registry-tarball";
-      isGit = entType == "git";  # XXX: Assumes that git deps have builds.
-      checkScripts =
-        ( pjs ? scripts.prebuild ) ||
-        ( pjs ? scripts.build ) ||
-        ( pjs ? scripts.postbuild );
-      forPure = ( entType == "git" ) || ( localPath && checkScripts );
-      handlePure = if impure then checkScripts else forPure;
-    in ( ! isRt ) && handlePure;
-    hasPrepare = let
-      checkScripts =
+    pjs = assert localPath; lib.importJSON' "${lockDir}/${pkey}/package.json";
+    hasBuild' = lib.optionalAttrs ( entType != "git" ) {
+      hasBuild = let
+        checkScripts = ( pjs ? scripts ) && (
+          ( pjs ? scripts.prebuild ) ||
+          ( pjs ? scripts.build ) ||
+          ( pjs ? scripts.postbuild )
+        );
+      in ( entType != "registry-tarball" ) && checkScripts;
+    };
+    hasPrepare' = lib.optionalAttrs localPath {
+      hasPrepare = ( pjs ? scripts ) && (
         ( pjs ? scripts.preprepare ) ||
         ( pjs ? scripts.prepare ) ||
-        ( pjs ? scripts.postprepare );
-      forPure = localPath && checkScripts;
-    in if impure then checkScripts else forPure;
+        ( pjs ? scripts.postprepare )
+      );
+    };
+    sourceInfo = if localPath then {
+      type = "path";
+      path = let
+        relDir = if pl2ent ? resolved then "/${pl2ent.resolved}" else
+          if pkey == "" then "" else "/${pkey}";
+      in "${lockDir}${relDir}";
+    } else ( {
+      type = if ( entType == "registry-tarball" ) then "tarball" else "git";
+      url  = pl2ent.resolved;
+    } // ( lib.optionalAttrs ( entType == "registry-tarball" ) {
+      hash = pl2ent.integrity;
+    } ) );
     meta = let
       core = metaCore { inherit ident version; };
     in core.__update ( {
-      inherit hasInstallScript hasBin hasBuild;
+      inherit hasInstallScript hasBin sourceInfo;
       entryFromType = "package-lock.json(v2)";
       entrySubtype = entType;
-      sourceInfo = {
-        inherit (source) narHash;
-      } // ( lib.optionalAttrs ( ! localPath ) ( {
-        url  = pl2ent.resolved;
-      } // ( lib.optionalAttrs ( entType == "registry-tarball" ) {
-        hash = pl2ent.integrity;
-      } ) ) );
-      entries = { __serial = false; pl2 = pl2ent // { inherit pkey; }; } //
-                ( lib.optionalAttrs ( localPath || impure ) { inherit pjs; } );
-    } // ( lib.optionalAttrs hasBin { inherit (pl2ent) bin; } ) //
-      ( lib.optionalAttrs ( localPath || impure ) { inherit hasPrepare; } ) );
-    # FIXME: use `doFetch', but update `fetcher.nix' to use `lib.fetchurlDrv'
-    tarball = if entType != "registry-tarball" then null else fetchurl {
-      name = meta.names.registryTarball;
-      url  = pl2ent.resolved;
-      hash = pl2ent.integrity;
+      entries = {
+        __serial = false;
+        pl2 = pl2ent // { inherit pkey; };
+      } // ( lib.optionalAttrs localPath { inherit pjs; } );
+    } // hasBuild' // hasPrepare' //
+    ( lib.optionalAttrs hasBin { inherit (pl2ent) bin; } ) );
+  in meta;
+
+  # v2 package locks normalize most fields, so for example, `bin' will always
+  # be an attrset of name -> path, even if the original `project.json' wrote
+  # `"bin": "./foo"' or `"direcories": { "bin": "./scripts" }'.
+  pkgEntFromPlockV2 = lockDir: pkey: {
+    version
+  , __pscope ? makeNodePkgSet {}
+  , ...
+  } @ pl2ent: let
+    meta = metaFromPlockV2 lockDir pkey pl2ent;
+  in mkExtInfo ( self: {
+    inherit version __pscope meta;
+    inherit (meta) ident key;
+    source = let
+      doFetch' = __pscope.__pscope.doFetch // { cwd = lockDir; };
+    in doFetch' pkey pl2ent;
+  } // ( lib.optionalAttrs ( meta.entrySubtype == "registry-tarball" ) {
+    tarball = self.__pscope.__pscope.fetchurl {
+      name = self.meta.names.registryTarball;
+      inherit (self.meta) url hash;
       unpack = false;
     };
-    source = ( globalAttrs.doFetch // { cwd = lockDir; } ) pkey pl2ent;
-  in mkExtInfo ( {
-    inherit key ident version meta source;
-  } // ( lib.optionalAttrs ( tarball != null ) { inherit tarball; } ) );
+  } ) );
 
 
 /* -------------------------------------------------------------------------- */
@@ -234,11 +280,14 @@
   # XXX: If you expect any local fetchers to actually work you must
   # the argument `lockDir' or `lockPath'.
   pkgEntriesFromPlockV2 = {
-    plock    ? lib.importJSON' lockPath
-  , lockDir  ? dirOf lockPath
-  , lockPath ? "${lockDir}/package-lock.json"
+    plock     ? lib.importJSON' lockPath
+  , lockDir   ? dirOf lockPath
+  , lockPath  ? "${lockDir}/package-lock.json"
   }: let
-    pl2ents = builtins.mapAttrs ( pkgEntFromPlockV2 lockDir ) plock.packages;
+    pl2ents = let
+      mkMetaEnt = k: v:
+        pkgEntFromPlockV2 lockDir k ( v // { __pscope = nodePkgs; } );
+    in builtins.mapAttrs mkMetaEnt plock.packages;
     # Direct runtime deps, and `peerDependencies' from direct `dependencies',
     # and `peerDependencies' recursively ( mimics `--legacy-peer-deps' ).
     runtimeKeys = lib.libplock.depsToPkgAttrsFor [
@@ -264,7 +313,8 @@
     };
     kents = let inherit (builtins) listToAttrs mapAttrs attrValues; in
       listToAttrs ( attrValues ( mapAttrs toKEnt pl2ents ) );
-  in kents;
+    nodePkgs = makeNodePkgSet kents;
+  in nodePkgs;
 
 
 /* -------------------------------------------------------------------------- */
@@ -569,6 +619,9 @@
 # This file is only partially complete.
 in {
   inherit
+    makeOuterScope
+    makeNodePkgSet
+
     pkgEntFromPjs
     pkgEntriesFromPjs
 
