@@ -87,8 +87,9 @@
       jq
     ] ++ ( lib.optional stdenv.isDarwin xcbuild );
     postUnpack = lib.optionalString ( ! dontLinkModules ) ''
-      ln -s -- ${nodeModules} "$sourceRoot/node_modules"
-      export PATH="$PATH:$sourceRoot/node_modules/.bin"
+      export absSourceRoot="$NIX_BUILD_TOP/$sourceRoot"
+      ln -s -- ${nodeModules} "$absSourceRoot/node_modules"
+      export PATH="$PATH:$absSourceRoot/node_modules/.bin"
     '';
     configurePhase = let
       runPreInst =
@@ -124,7 +125,7 @@
       cp -pr --reflink=auto -- ./build "$build"
       rm -f -- ./node_modules
       cd "$NIX_BUILD_TOP"
-      mv -- "$sourceRoot" "$out"
+      mv -- "$absSourceRoot" "$out"
     '';
     passthru = { inherit src nodejs nodeModules; };
   } // mkDrvAttrs );

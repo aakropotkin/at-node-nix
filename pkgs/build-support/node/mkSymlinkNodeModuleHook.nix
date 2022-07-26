@@ -40,7 +40,7 @@ in ''
     if test -z "$sourceRoot"; then
       NODE_MODULES_DIR="$PWD/node_modules"
     else
-      NODE_MODULES_DIR="$TMP/$sourceRoot/node_modules"
+      NODE_MODULES_DIR="$NIX_BUILD_TOP/$sourceRoot/node_modules"
     fi
     export NODE_MODULES_DIR
   }

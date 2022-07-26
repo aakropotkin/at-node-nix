@@ -72,7 +72,7 @@
     nativeBuildInputs = ( attrs.nativeBuildInputs or [] ) ++ [jq] ++
                         ( lib.optional ( nodejs != null ) nodejs );
     postUnpack = lib.optionalString ( ! dontLinkModules ) ''
-      export absSourceRoot="$PWD/$sourceRoot"
+      export absSourceRoot="$NIX_BUILD_TOP/$sourceRoot"
       ln -s -- ${nodeModules} "$sourceRoot/node_modules"
       export PATH="$PATH:$absSourceRoot/node_modules/.bin"
     '';
