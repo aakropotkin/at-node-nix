@@ -29,12 +29,21 @@ let
     isPath  = ! ( ( entry ? link ) || ( entry ? resolved ) );
     isRegTb =
       ( ( entry ? integrity ) || ( entry ? sha1 ) ) &&
-      ( entry ? resolved ) && ( lib.test "http.*\\.tgz" entry.resolved );
+      ( entry ? resolved ) && ( lib.test "http.*/-/.*\\.tgz" entry.resolved );
+    isSrcTb =
+      ( ( entry ? integrity ) || ( entry ? sha1 ) ) &&
+      ( entry ? resolved ) &&
+      # XXX: Checking for "/-/" in the URL path is far from "robust" but
+      #      it does what I need it to do for now.
+      ( ! ( lib.test "http.*/-/.*\\.tgz" entry.resolved ) ) &&
+      ( lib.test "http.*\\.(tar\\.gz|tgz)" entry.resolved );
   in if isLink  then "symlink"          else
      if isGit   then "git"              else
      if isPath  then "path"             else
+     # XXX: `isRegTb' must be checked before `isSrcTb`
      if isRegTb then "registry-tarball" else
-     throw "Unrecognized entry type: ${toJSON entry}";
+     if isSrcTb then "source-tarball"   else
+     throw "(typeOfEntry) Unrecognized entry type: ${toJSON entry}";
 
 
 /* -------------------------------------------------------------------------- */
@@ -189,8 +198,8 @@ let
   #       `cwd' because relying on the default of `PWD' makes a BIG assumption,
   #       which is that all of these paths are locally available.
   pkp2fetchArgs = {
-    cwd ? ( if impure then builtins.getEnv "PWD"
-                      else throw "Cannot determine CWD to resolve path URIs" )
+    cwd ? ( if impure then builtins.getEnv "PWD" else
+          throw "(pkp2fetchArgs) Cannot determine CWD to resolve path URIs" )
   , key # relative path
   }: let
     cwd' = assert lib.libpath.isAbspath cwd; head ( match "(.*[^/])/?" cwd );
@@ -210,8 +219,8 @@ let
   #       run for a regular "node_modules/<path>" entry.
   #       We do not trigger life-cycle here, and defer to the caller.
   pel2fetchArgs = {
-    cwd ? ( if impure then builtins.getEnv "PWD"
-                      else throw "Cannot determine CWD to resolve link URIs" )
+    cwd ? ( if impure then builtins.getEnv "PWD" else
+          throw "(pel2fetchArgs) Cannot determine CWD to resolve link URIs" )
   }: { resolved, ... }: pkp2fetchArgs { inherit cwd; key = resolved; };
 
 
@@ -224,7 +233,8 @@ let
      if type == "path"    then pkp2fetchArgs ( { inherit key; } // cwda ) else
      if type == "git"     then peg2fetchArgs entry                        else
      if type == "registry-tarball" then per2fetchArgs entry               else
-     throw "Unrecognized entry type for: ${key}";
+     if type == "source-tarball" then per2fetchArgs entry                 else
+     throw "(pke2fetchArgs) Unrecognized entry type for: ${key}";
 
 
 /* -------------------------------------------------------------------------- */
@@ -292,7 +302,8 @@ let
       if type == "path"             then self.dirFetcher  else
       if type == "git"              then self.gitFetcher  else
       if type == "registry-tarball" then self.urlFetcher  else
-      throw "Unrecognized entry type for: ${entry}";
+      if type == "source-tarball"   then self.urlFetcher  else
+      throw "(fetcher:doFetch) Unrecognized entry type for: ${entry}";
     in fetchFn fetchArgs;
   in config // { __functor = self: doFetch self; };
 

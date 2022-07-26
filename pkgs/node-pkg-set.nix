@@ -227,7 +227,10 @@
     localPath = ( entType == "path" ) || ( entType == "symlink" );
     pjs = assert localPath; lib.importJSON' "${lockDir}/${pkey}/package.json";
 
-    hasBuild' = lib.optionalAttrs ( entType != "git" ) {
+    isTb = ( entType == "registry-tarball" ) || ( entType == "source-tarball" );
+    isRemoteSrc = ( entType == "git" ) || ( entType == "source-tarball" );
+
+    hasBuild' = lib.optionalAttrs ( ! isRemoteSrc ) {
       hasBuild = let
         checkScripts = ( pjs ? scripts ) && (
           ( pjs ? scripts.prebuild ) ||
@@ -237,8 +240,8 @@
       in ( entType != "registry-tarball" ) && checkScripts;
     };
 
-    hasPrepare' = lib.optionalAttrs ( entType != "git") {
-      hasPrepare = ( entType != "registry-tarball" ) && ( pjs ? scripts ) && (
+    hasPrepare' = lib.optionalAttrs ( ! isRemoteSrc ) {
+      hasPrepare = localPath && ( pjs ? scripts ) && (
         ( pjs ? scripts.preprepare ) ||
         ( pjs ? scripts.prepare ) ||
         ( pjs ? scripts.postprepare )
@@ -252,11 +255,8 @@
           if pkey == "" then "" else "/${pkey}";
       in "${lockDir}${relDir}";
     } else ( {
-      type = if ( entType == "registry-tarball" ) then "tarball" else "git";
-      url  = pl2ent.resolved;
-    } // ( lib.optionalAttrs ( entType == "registry-tarball" ) {
-      hash = pl2ent.integrity;
-    } ) );
+      type = if isTb then "tarball" else "git"; url  = pl2ent.resolved;
+    } // ( lib.optionalAttrs isTb { hash = pl2ent.integrity; } ) );
 
     meta = let
       core = metaCore { inherit ident version; };
@@ -284,13 +284,15 @@
   , ...
   } @ pl2ent: let
     meta = metaFromPlockV2 lockDir pkey pl2ent;
+    isTb = ( meta.entrySubtype == "registry-tarball" ) ||
+           ( meta.entrySubtype == "source-tarball" );
   in mkExtInfo ( self: {
     inherit version __pscope meta;
     inherit (meta) ident key;
     source = let
       doFetch' = __pscope.__pscope.doFetch // { cwd = lockDir; };
     in doFetch' pkey pl2ent;
-  } // ( lib.optionalAttrs ( meta.entrySubtype == "registry-tarball" ) {
+  } // ( lib.optionalAttrs isTb {
     tarball = self.__pscope.__pscope.fetchurl {
       name = self.meta.names.registryTarball;
       inherit (self.meta.sourceInfo) url hash;
@@ -311,8 +313,9 @@
   , lockPath ? "${lockDir}/package-lock.json"
   }: let
     pl2ents = let
-      mkMetaEnt = k: v:
-        pkgEntFromPlockV2 lockDir k ( v // { __pscope = nodePkgs; } );
+      mkMetaEnt = k: v: let
+        ent = pkgEntFromPlockV2 lockDir k ( v // { __pscope = nodePkgs; } );
+      in builtins.trace "  generating entry for: ${k}" ent;
     in builtins.mapAttrs mkMetaEnt plock.packages;
     # Direct runtime deps, and `peerDependencies' from direct `dependencies',
     # and `peerDependencies' recursively ( mimics `--legacy-peer-deps' ).
@@ -546,8 +549,11 @@
   , ...
   } @ attrs: let
     binEnts = let
-      mkBins = bname: p: { name = ".bin/${bname}"; path = "${ident}/${p}"; };
-      fromBindir = [{ name = ".bin"; path = "${ident}/${meta.bin.__DIR__}"; }];
+      mkBins = bname: p: { name = ".bin/${bname}"; path = "../${ident}/${p}"; };
+      fromBindir = [{
+        name = ".bin";
+        path = "../${ident}/${meta.bin.__DIR__}";
+      }];
     in if ( ! ( meta.hasBin or false ) ) then [] else
        if meta.bin ? __DIR__ then fromBindir else
        ( lib.mapAttrsToList mkBins meta.bin );
@@ -599,8 +605,10 @@
   , ...
   } @ attrs: untarSanPerms { inherit tarball name; };
 
-  extendEntUseSafeUnpack = ent: ent.__extend ( final: prev:
-    lib.optionalAttrs ( prev.meta.entrySubtype == "registry-tarball" ) {
+  extendEntUseSafeUnpack = ent: ent.__extend ( final: prev: let
+    isTb = ( prev.meta.entrySubtype == "registry-tarball" ) ||
+           ( prev.meta.entrySubtype == "source-tarball" );
+  in lib.optionalAttrs isTb {
       source = final.__apply unpackSafe {};
       meta   = prev.meta.__extend ( _: _: { useSafeUnpack = true; } );
     } );
