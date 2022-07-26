@@ -72,8 +72,9 @@
     nativeBuildInputs = ( attrs.nativeBuildInputs or [] ) ++ [jq] ++
                         ( lib.optional ( nodejs != null ) nodejs );
     postUnpack = lib.optionalString ( ! dontLinkModules ) ''
+      export absSourceRoot="$PWD/$sourceRoot"
       ln -s -- ${nodeModules} "$sourceRoot/node_modules"
-      export PATH="$PATH:$sourceRoot/node_modules/.bin"
+      export PATH="$PATH:$absSourceRoot/node_modules/.bin"
     '';
     buildPhase = let
       runOne = sn: let
@@ -82,9 +83,9 @@
       runAll = builtins.concatStringsSep "\n" ( map runOne runScripts );
     in lib.withHooks "build" runAll;
     installPhase = lib.withHooks "install" ''
-      rm -f -- ./node_modules
+      rm -rf -- ./node_modules
       cd "$NIX_BUILD_TOP"
-      mv -- "$sourceRoot" "$out"
+      mv -- "$absSourceRoot" "$out"
     '';
     passthru = ( attrs.passthru or {} ) // { inherit src nodejs nodeModules; };
   } // mkDrvArgs );

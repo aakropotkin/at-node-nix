@@ -33,7 +33,7 @@
   # Don't override them.
   trivial = ak-nix.trivial.${system};
   # This inherit block is largely for the benefit of the reader.
-  inherit (trivial) runLn linkOut linkToPath runTar untar tar;
+  inherit (trivial) runLn linkOut linkToPath runTar untar tar untarSanPerms;
 
   pacote =
     ( import ./development/node-packages/pacote { inherit pkgs; } ).package;
@@ -89,6 +89,7 @@
 
   _node-pkg-set = import ./node-pkg-set.nix {
     inherit lib evalScripts buildGyp nodejs linkModules genericInstall runBuild;
+    inherit untarSanPerms;
     inherit (pkgs) stdenv jq xcbuild linkFarm;
     inherit (_fetcher) typeOfEntry;
     inherit (_mkNodeTarball) packNodeTarballAsIs;
@@ -186,6 +187,10 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
     extendEntWithModule
     extendEntAddModule
     extendPkgSetWithModules
+
+    unpackSafe
+    extendEntUseSafeUnpack
+    extendPkgSetWithSafeUnpackList
   ;
 
 } )

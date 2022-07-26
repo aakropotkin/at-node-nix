@@ -94,7 +94,7 @@
       _node-pkg-set = import ./pkgs/node-pkg-set.nix {
         inherit (final) lib evalScripts buildGyp nodejs linkModules;
         inherit (final) runBuild genericInstall packNodeTarballAsIs;
-        inherit (pkgsFor) stdenv jq xcbuild linkFarm;
+        inherit (pkgsFor) stdenv jq xcbuild linkFarm untarSanPerms;
         inherit (final._fetcher) typeOfEntry;
         fetchurl = final.lib.fetchurlDrv;  # For tarballs without unpacking
         doFetch = final._fetcher.fetcher {
@@ -133,6 +133,10 @@
         extendEntWithModule
         extendEntAddModule
         extendPkgSetWithModules
+
+        unpackSafe
+        extendEntUseSafeUnpack
+        extendPkgSetWithSafeUnpackList
       ;
 
       genericInstall = import ./pkgs/build-support/genericInstall.nix {
@@ -249,6 +253,7 @@
         inherit runBuild;
         inherit (_mkNodeTarball) packNodeTarballAsIs;
         inherit (nixpkgs.legacyPackages.${system}) stdenv jq xcbuild linkFarm;
+        inherit (ak-nix.trivial.${system}) untarSanPerms;
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
         inherit (_fetcher) typeOfEntry;
         fetchurl = lib.fetchurlDrv;  # For tarballs without unpacking
@@ -322,6 +327,10 @@
         extendEntWithModule
         extendEntAddModule
         extendPkgSetWithModules
+
+        unpackSafe
+        extendEntUseSafeUnpack
+        extendPkgSetWithSafeUnpackList
       ;
 
       inherit (_mkNodeTarball)

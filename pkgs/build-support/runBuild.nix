@@ -18,7 +18,7 @@
   , nativeBuildInputs ? []  # `nodejs' and `jq' are added unconditionally
   , entType           ? args.entType or meta.entSubtype
   , runPrePublish     ? ( ( args ? entType ) || ( meta ? entSubtype ) ) &&
-                        ( entType != "git" )
+                        ( ( args.entType or meta.entSubtype ) != "git" )
   , ...
   } @ args: let
     evalScriptArgs = removeAttrs args ["runScripts runPrePublish"];

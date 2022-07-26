@@ -7,6 +7,7 @@
 , genericInstall
 , runBuild
 , linkModules
+, untarSanPerms
 , linkFarm
 , stdenv
 , xcbuild
@@ -85,6 +86,7 @@
           nodejs
           jq
           doFetch
+          untarSanPerms
           linkModules
           runBuild
           buildGyp
@@ -294,7 +296,9 @@
       inherit (self.meta.sourceInfo) url hash;
       unpack = false;
     };
-  } ) );
+  } // ( lib.optionalAttrs ( meta.useSafeUnpack or false ) {
+    source = unpackSafe self;
+  } ) ) );
 
 
 /* -------------------------------------------------------------------------- */
@@ -584,6 +588,31 @@
 
 /* -------------------------------------------------------------------------- */
 
+  # FIXME: Move to fetcher or something?
+  unpackSafe = {
+    tarball
+  , name          ? meta.names.src
+  , meta
+  , untarSanPerms ? __pscope.__pscope.untarSanPerms or
+                    __pscope.__pscope.__pscope.untarSanPerms
+  , __pscope
+  , ...
+  } @ attrs: untarSanPerms { inherit tarball name; };
+
+  extendEntUseSafeUnpack = ent: ent.__extend ( final: prev:
+    lib.optionalAttrs ( prev.meta.entrySubtype == "registry-tarball" ) {
+      source = final.__apply unpackSafe {};
+      meta   = prev.meta.__extend ( _: _: { useSafeUnpack = true; } );
+    } );
+
+  extendPkgSetWithSafeUnpackList = keys: final: prev: let
+    packages = lib.filterAttrs ( k: _: builtins.elem k keys )
+                               ( removeAttrs prev ["__pscope"] );
+  in builtins.mapAttrs ( _: extendEntUseSafeUnpack ) packages;
+
+
+/* -------------------------------------------------------------------------- */
+
   pkgSetDrvOverlays = [
     extendPkgSetWithBuilds
     extendPkgSetWithInstalls
@@ -642,6 +671,10 @@ in {
     extendEntWithModule
     extendEntAddModule
     extendPkgSetWithModules
+
+    unpackSafe
+    extendEntUseSafeUnpack
+    extendPkgSetWithSafeUnpackList
   ;
 }
 
