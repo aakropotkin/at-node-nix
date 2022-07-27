@@ -109,6 +109,8 @@
         pkgEntFromPjs
         pkgEntriesFromPjs
 
+        metaEntriesFromPlockV2
+        metaEntFromPlockV2
         pkgEntFromPlockV2
         pkgEntriesFromPlockV2
 
@@ -303,6 +305,8 @@
         pkgEntFromPjs
         pkgEntriesFromPjs
 
+        metaEntriesFromPlockV2
+        metaEntFromPlockV2
         pkgEntFromPlockV2
         pkgEntriesFromPlockV2
 

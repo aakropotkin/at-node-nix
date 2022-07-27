@@ -214,7 +214,7 @@
 
 /* -------------------------------------------------------------------------- */
 
-  metaFromPlockV2 = lockDir: pkey: {
+  metaEntFromPlockV2 = lockDir: pkey: {
     version
   , hasInstallScript ? false
   , hasBin   ? ( pl2ent.bin or {} ) != {}
@@ -248,15 +248,21 @@
       );
     };
 
-    sourceInfo = if localPath then {
-      type = "path";
-      path = let
-        relDir = if pl2ent ? resolved then "/${pl2ent.resolved}" else
-          if pkey == "" then "" else "/${pkey}";
-      in "${lockDir}${relDir}";
-    } else ( {
-      type = if isTb then "tarball" else "git"; url  = pl2ent.resolved;
-    } // ( lib.optionalAttrs isTb { hash = pl2ent.integrity; } ) );
+    sourceInfo = let
+      type = if localPath then "path" else if isTb then "tarball" else "git";
+      hash' = lib.optionalAttrs ( pl2ent ? integrity ) {
+        hash = pl2ent.integrity;
+      };
+      url' = lib.optionalAttrs ( ! localPath ) {
+        url = pl2ent.resolved;
+      };
+      path' = lib.optionalAttrs localPath {
+        path = let
+          relDir = if pl2ent ? resolved then "/${pl2ent.resolved}" else
+            if pkey == "" then "" else "/${pkey}";
+        in "${lockDir}${relDir}";
+      };
+    in { inherit type; } // hash' // url' // path';
 
     meta = let
       core = metaCore { inherit ident version; };
@@ -275,6 +281,102 @@
 
 /* -------------------------------------------------------------------------- */
 
+  metaEntriesFromPlockV2 = {
+    plock          ? lib.importJSON' lockPath
+  , lockDir        ? dirOf lockPath
+  , lockPath       ? "${lockDir}/package-lock.json"
+  , overlays       ? []
+  , entOverlays    ? []
+  , legacyPeerDeps ? false
+  , ignoreOptional ? true  # THIS REFERS TO PEERS
+  , forceRtDeps    ? []  # list of keys
+  , forceDevDeps   ? []  # list of keys
+  , ...
+  } @ args: assert plock.lockfileVersion == 2; let
+    lp = lib.libplock;
+    ents = let
+      pkgEnts = builtins.mapAttrs ( metaEntFromPlockV2 lockDir ) plock.packages;
+      entOv   = lib.composeManyExtensions entOverlays;
+      withOv  = builtins.mapAttrs ( _: e: e.__extend entOv ) pkgEnts;
+    in if entOverlays != [] then withOv else pkgEnts;
+    inherit (builtins) attrNames filter concatMap genericClosure;
+    getPeerIdsFromFor = from: i: let
+      e         = lp.resolveDepFor plock from i;
+      pdm       = e.peerDependenciesMeta or {};
+      doIgnores = ignoreOptional && ( e ? peerDependenciesMeta );
+      flt       = p: ! ( pdm.${p}.optional or false );
+      peerIds   = attrNames e.peerDependencies;
+      keeps     = filter flt peerIds;
+      peers     = if ! ( e ? peerDependencies ) then [] else
+                  if doIgnores then keeps else peerIds;
+    in peers;
+    # FIXME: handle optional direct deps
+    directRtResolvesFor = from: let
+      direct = attrNames ( ( lp.realEntry plock from ).dependencies or {} );
+      getPeerIdsFor = getPeerIdsFromFor from;
+      directPeerIds = concatMap getPeerIdsFor direct;
+      allDirectIds  = lib.unique ( direct ++ directPeerIds );
+    in map ( i: ( lp.resolveDepFor plock from i ).resolved ) allDirectIds;
+    rtResolvesClosureFor = from: let
+      getKeyed = f: { key = f; resolves = directRtResolvesFor f; };
+      closed = genericClosure {
+        startSet = [( getKeyed from)];
+        operator = { key, resolves }: map getKeyed resolves;
+      };
+    in builtins.filter ( k: k != from ) ( map ( x: x.key ) closed );
+    toPkgSetKey = r: let
+      e = if r == "" then plock else plock.packages.${r};
+      name = e.name or ( lib.yank ".*node_modules/(.*)" r );
+    in "${name}/${e.version}";
+    rtPkgSetKeyClosureFor = from: map toPkgSetKey ( rtResolvesClosureFor from );
+    devResolvesFor = from: let
+      dev = attrNames ( ( lp.realEntry plock from ).devDependencies or {} );
+      getPeerIdsFor = getPeerIdsFromFor from;
+      devPeerIds = concatMap getPeerIdsFor dev;
+      allDevIds = lib.unique ( dev ++ devPeerIds );
+    in map ( i: ( lp.resolveDepFor plock from i ).resolved ) allDevIds;
+    devResolvesClosureFor = from: let
+      devres = devResolvesFor from;
+      getKeyed = f: { key = f; resolves = directRtResolvesFor f; };
+      closed = genericClosure {
+        startSet = map getKeyed devres;
+        operator = { key, resolves }: map getKeyed resolves;
+      };
+    in builtins.filter ( k: k != from ) ( map ( x: x.key ) closed );
+    devPkgSetKeyClosureFor = from:
+      map toPkgSetKey ( devResolvesClosureFor from );
+    extendWithDepKeys = from: meta: let
+      needsDev =
+        ( builtins.elem meta.key forceRtDeps ) ||
+        ( ( meta.sourceInfo.type != "tarball" ) &&
+          ( meta.hasBuild or ( meta.sourceInfo.type == "git" ) ) );
+      needsDeps =
+        ( builtins.elem meta.key forceDevDeps ) || needsDev ||
+        ( meta.hasInstallScript or ( ( meta.sourceInfo.type != "tarball" ) &&
+                                     ( meta.hasPrepare or false ) ) );
+      rt' = lib.optionalAttrs needsDeps {
+        runtimeDepKeys = rtPkgSetKeyClosureFor from;
+      };
+      dev' = lib.optionalAttrs needsDev {
+        devDepKeys = devPkgSetKeyClosureFor from;
+      };
+    in if ! ( needsDev || needsDeps ) then meta else
+       meta.__extend ( _: _: rt' // dev' );
+    extendMetaSetWithDepKeys = final: prev:
+      builtins.mapAttrs
+        ( _: meta: extendWithDepKeys meta.entries.pl2.pkey meta )
+        prev;
+    ov = lib.composeManyExtensions ( overlays ++ [extendMetaSetWithDepKeys] );
+    metaSet = let
+      lst   = builtins.attrValues ents;
+      keyed = map ( { key, ... } @ value: { name = key; inherit value; } ) lst;
+      raw = builtins.listToAttrs keyed;
+    in lib.extends ov ( self: raw );
+  in lib.fix' metaSet;
+
+
+/* -------------------------------------------------------------------------- */
+
   # v2 package locks normalize most fields, so for example, `bin' will always
   # be an attrset of name -> path, even if the original `project.json' wrote
   # `"bin": "./foo"' or `"direcories": { "bin": "./scripts" }'.
@@ -283,7 +385,7 @@
   , __pscope ? makeNodePkgSet {}
   , ...
   } @ pl2ent: let
-    meta = metaFromPlockV2 lockDir pkey pl2ent;
+    meta = metaEntFromPlockV2 lockDir pkey pl2ent;
     isTb = ( meta.entrySubtype == "registry-tarball" ) ||
            ( meta.entrySubtype == "source-tarball" );
   in mkExtInfo ( self: {
@@ -314,8 +416,10 @@
   }: let
     pl2ents = let
       mkMetaEnt = k: v: let
-        ent = pkgEntFromPlockV2 lockDir k ( v // { __pscope = nodePkgs; } );
-      in builtins.trace "  generating entry for: ${k}" ent;
+        ent = pkgEntFromPlockV2 lockDir k v;
+        #ent = pkgEntFromPlockV2 lockDir k ( v // { __pscope = nodePkgs; } );
+      in #builtins.trace "  generating entry for: ${k}"
+         ent;
     in builtins.mapAttrs mkMetaEnt plock.packages;
     # Direct runtime deps, and `peerDependencies' from direct `dependencies',
     # and `peerDependencies' recursively ( mimics `--legacy-peer-deps' ).
@@ -332,9 +436,10 @@
       name = key;
       value = let
         keyArgs = { from = pkey; inherit ident version; };
-      in plent.__extend ( peFinal: pePrev: {
-        meta = pePrev.meta.__extend ( mFinal: mPrev: {
-          runtimeDepKeys = runtimeKeys keyArgs;
+      in plent.__extend ( _: pePrev: {
+        meta = pePrev.meta.__extend ( _: mPrev: {
+          #runtimeDepKeys = runtimeKeys keyArgs;
+          runtimeDepKeys = lib.libplock.runtimeClosureToPkgAttrsFor plock keyArgs;
         } // ( lib.optionalAttrs ( mPrev.hasBuild or false ) {
           devDepKeys = devKeys keyArgs;
         } ) );
@@ -394,7 +499,13 @@
       inherit allDevKeys;
       nodeModulesDir-dev = k2MD allDevKeys;
     } ) );
-  in builtins.mapAttrs setModulesFor ( removeAttrs prev ["__pscope"] );
+    # Global Modules also need it but I have to unfuck the cycle chasing first.
+    needsNm = k: { meta, ... } @ ent:
+      ( meta.hasBuild   or true )        ||
+      ( meta.hasInstallScript or false ) ||
+      ( meta.hasPrepare or false );
+    packages = lib.filterAttrs needsNm ( removeAttrs prev ["__pscope"] );
+  in builtins.mapAttrs setModulesFor packages;
 
 
 /* -------------------------------------------------------------------------- */
@@ -501,7 +612,7 @@
   , source    ? throw "You gotta give me something to work with here"
   , built     ? source
   , installed ? built
-  , nodeModulesDir
+  , nodeModulesDir ? null
   , evalScripts ? __pscope.__pscope.evalScripts or
                   __pscope.__pscope.__pscope.evalScripts
   , nodejs      ? __pscope.__pscope.nodejs or __pscope.__pscope.__pscope.nodejs
@@ -654,7 +765,8 @@ in {
     pkgEntFromPjs
     pkgEntriesFromPjs
 
-    metaFromPlockV2
+    metaEntriesFromPlockV2
+    metaEntFromPlockV2
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
 

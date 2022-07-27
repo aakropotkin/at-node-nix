@@ -163,6 +163,8 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
     pkgEntFromPjs
     pkgEntriesFromPjs
 
+    metaEntriesFromPlockV2
+    metaEntFromPlockV2
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
 
