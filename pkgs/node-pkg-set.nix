@@ -480,7 +480,7 @@
         modules = map ( k: final.${k}.module.outPath ) keys;
       };
     in {
-      nodeModulesDir = k2MD ePrev.meta.runtimeKeys;
+      nodeModulesDir = k2MD ePrev.meta.runtimeDepKeys;
     } // ( lib.optionalAttrs ( ePrev.meta ? devDepKeys ) {
       nodeModulesDir-dev = k2MD allDevKeys;
     } ) );
