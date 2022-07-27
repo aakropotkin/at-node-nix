@@ -230,17 +230,17 @@
     isTb = ( entType == "registry-tarball" ) || ( entType == "source-tarball" );
     isRemoteSrc = ( entType == "git" ) || ( entType == "source-tarball" );
 
-    hasBuild' = lib.optionalAttrs ( ! isRemoteSrc ) {
+    hasBuild' = lib.optionalAttrs ( entType != "git" ) {
       hasBuild = let
         checkScripts = ( pjs ? scripts ) && (
           ( pjs ? scripts.prebuild ) ||
           ( pjs ? scripts.build ) ||
           ( pjs ? scripts.postbuild )
         );
-      in ( entType != "registry-tarball" ) && checkScripts;
+      in ( ! isTb ) && checkScripts;
     };
 
-    hasPrepare' = lib.optionalAttrs ( ! isRemoteSrc ) {
+    hasPrepare' = lib.optionalAttrs ( entType != "git" ) {
       hasPrepare = localPath && ( pjs ? scripts ) && (
         ( pjs ? scripts.preprepare ) ||
         ( pjs ? scripts.prepare ) ||
@@ -282,23 +282,23 @@
 /* -------------------------------------------------------------------------- */
 
   metaEntriesFromPlockV2 = {
-    plock          ? lib.importJSON' lockPath
-  , lockDir        ? dirOf lockPath
-  , lockPath       ? "${lockDir}/package-lock.json"
-  , overlays       ? []
-  , entOverlays    ? []
-  , legacyPeerDeps ? false
-  , ignoreOptional ? true  # THIS REFERS TO PEERS
-  , forceRtDeps    ? []  # list of keys
-  , forceDevDeps   ? []  # list of keys
+    plock           ? lib.importJSON' lockPath
+  , lockDir         ? dirOf lockPath
+  , lockPath        ? "${lockDir}/package-lock.json"
+  , metaSetOverlays ? []
+  , metaEntOverlays ? []
+  , legacyPeerDeps  ? false
+  , ignoreOptional  ? true  # THIS REFERS TO PEERS
+  , forceRtDeps     ? []  # list of keys
+  , forceDevDeps    ? []  # list of keys
   , ...
   } @ args: assert plock.lockfileVersion == 2; let
     lp = lib.libplock;
     ents = let
       pkgEnts = builtins.mapAttrs ( metaEntFromPlockV2 lockDir ) plock.packages;
-      entOv   = lib.composeManyExtensions entOverlays;
+      entOv   = lib.composeManyExtensions metaEntOverlays;
       withOv  = builtins.mapAttrs ( _: e: e.__extend entOv ) pkgEnts;
-    in if entOverlays != [] then withOv else pkgEnts;
+    in if metaEntOverlays != [] then withOv else pkgEnts;
     inherit (builtins) attrNames filter concatMap genericClosure;
     getPeerIdsFromFor = from: i: let
       e         = lp.resolveDepFor plock from i;
@@ -311,6 +311,13 @@
                   if doIgnores then keeps else peerIds;
     in peers;
     # FIXME: handle optional direct deps
+    # FIXME: the way you are resolving using the key names for subfields
+    #        ( written in `lib.libplock' ) is inefficient compared to referncing
+    #        an entry's `dependency' and `requires' fields.
+    #        These will include `resolved', `dev', etc fields nested in an
+    #        attrset as opposed to a regular descriptor - if you just find a
+    #        descriptor you search "../dependencies", then "../../dependencies"
+    #        just like the regular resolution algo.
     directRtResolvesFor = from: let
       direct = attrNames ( ( lp.realEntry plock from ).dependencies or {} );
       getPeerIdsFor = getPeerIdsFromFor from;
@@ -366,13 +373,28 @@
       builtins.mapAttrs
         ( _: meta: extendWithDepKeys meta.entries.pl2.pkey meta )
         prev;
-    ov = lib.composeManyExtensions ( overlays ++ [extendMetaSetWithDepKeys] );
+    ov = lib.composeManyExtensions ( metaSetOverlays ++
+                                     [extendMetaSetWithDepKeys] );
     metaSet = let
       lst   = builtins.attrValues ents;
       keyed = map ( { key, ... } @ value: { name = key; inherit value; } ) lst;
-      raw = builtins.listToAttrs keyed;
-    in lib.extends ov ( self: raw );
-  in lib.fix' metaSet;
+      raw   = builtins.listToAttrs keyed;
+      mrec  = self:
+        ( builtins.mapAttrs ( _: v: v // { __pscope = self; } ) raw ) // {
+          __meta = {
+            __serial = false;
+            setFromType = "package-lock.json(v2)";
+            inherit plock lockDir lockPath metaSetOverlays metaEntOverlays
+                    legacyPeerDeps ignoreOptional forceRtDeps forceDevDeps;
+          };
+        };
+      extra = {
+        __entries = self: removeAttrs self ( extInfoExtras ++ ["__meta"] );
+        __new = self: lib.libmeta.mkExtInfo' extra;
+      };
+      ext = lib.libmeta.mkExtInfo' extra mrec;
+    in ext.__extend ov;
+  in metaSet;
 
 
 /* -------------------------------------------------------------------------- */
@@ -385,7 +407,8 @@
   , __pscope ? makeNodePkgSet {}
   , ...
   } @ pl2ent: let
-    meta = metaEntFromPlockV2 lockDir pkey pl2ent;
+    meta = if pl2ent ? entryFromType then pl2ent else
+           ( metaEntFromPlockV2 lockDir pkey pl2ent );
     isTb = ( meta.entrySubtype == "registry-tarball" ) ||
            ( meta.entrySubtype == "source-tarball" );
   in mkExtInfo ( self: {
@@ -393,7 +416,7 @@
     inherit (meta) ident key;
     source = let
       doFetch' = __pscope.__pscope.doFetch // { cwd = lockDir; };
-    in doFetch' pkey pl2ent;
+    in doFetch' self.meta.entries.pl2.pkey self.meta.entries.pl2;
   } // ( lib.optionalAttrs isTb {
     tarball = self.__pscope.__pscope.fetchurl {
       name = self.meta.names.registryTarball;
@@ -413,41 +436,18 @@
     plock    ? lib.importJSON' lockPath
   , lockDir  ? dirOf lockPath
   , lockPath ? "${lockDir}/package-lock.json"
-  }: let
-    pl2ents = let
-      mkMetaEnt = k: v: let
-        ent = pkgEntFromPlockV2 lockDir k v;
-        #ent = pkgEntFromPlockV2 lockDir k ( v // { __pscope = nodePkgs; } );
-      in #builtins.trace "  generating entry for: ${k}"
-         ent;
-    in builtins.mapAttrs mkMetaEnt plock.packages;
-    # Direct runtime deps, and `peerDependencies' from direct `dependencies',
-    # and `peerDependencies' recursively ( mimics `--legacy-peer-deps' ).
-    runtimeKeys = lib.libplock.depsToPkgAttrsFor [
-      "dependencies" "peerDependencies"
-    ] plock;
-    #  Direct dev deps, and `peerDependencies' from direct `devDependencies',
-    # and `peerDependencies' recursively.
-    devKeys = lib.libplock.depsToPkgAttrsFor [
-      "devDependencies" "peerDependencies"
-    ] plock;
-    # Create a rudimentary extensible entry for each package lock entry.
-    toKEnt = pkey: { key, ident, version, ... } @ plent: {
-      name = key;
-      value = let
-        keyArgs = { from = pkey; inherit ident version; };
-      in plent.__extend ( _: pePrev: {
-        meta = pePrev.meta.__extend ( _: mPrev: {
-          #runtimeDepKeys = runtimeKeys keyArgs;
-          runtimeDepKeys = lib.libplock.runtimeClosureToPkgAttrsFor plock keyArgs;
-        } // ( lib.optionalAttrs ( mPrev.hasBuild or false ) {
-          devDepKeys = devKeys keyArgs;
-        } ) );
-      } );
-    };
-    kents = let inherit (builtins) listToAttrs mapAttrs attrValues; in
-      listToAttrs ( attrValues ( mapAttrs toKEnt pl2ents ) );
-    nodePkgs = makeNodePkgSet kents;
+  , pl2metas ? metaEntriesFromPlockV2 ( {
+                   inherit lockDir lockPath plock;
+               } // args )
+  , ...
+  } @ args: let
+    mkPkgEnt = __pscope: k: v:
+      pkgEntFromPlockV2 lockDir v.entries.pl2.pkey
+                                ( v // { inherit __pscope; } );
+    pl2entsR = let
+      ents = pl2metas.__entries;
+    in self: builtins.mapAttrs ( mkPkgEnt self ) ents;
+    nodePkgs = makeNodePkgSet ( pl2entsR nodePkgs );
   in nodePkgs;
 
 
@@ -473,30 +473,15 @@
 
   # XXX: This must be composed with the group of overlays which adds `prepared'.
   extendPkgSetWithNodeModulesDirs = final: prev: let
-    s2k = key: { inherit key; };
-    k2s = { key, ... }: key;
     setModulesFor = _: value: value.__extend ( eFinal: ePrev: let
-      rtKs    = map s2k ePrev.meta.runtimeDepKeys;
-      dKs     = rtKs ++ ( map s2k ePrev.meta.devDepKeys );
-      rtKsFor = k: map s2k final.${k}.meta.runtimeDepKeys;
-      allRtKs = builtins.genericClosure {
-        startSet = rtKs;
-        operator = { key, ... }: rtKsFor key;
-      };
-      justDKs = builtins.genericClosure {
-        startSet = dKs;
-        operator = { key, ... }: rtKsFor key;
-      };
-      allRtKeys  = map k2s allRtKs;
-      allDevKeys = lib.unique ( allRtKeys ++ ( map k2s justDKs ) );
+      allDevKeys =
+        lib.unique ( ePrev.meta.runtimeDepKeys ++ ePrev.meta.devDepKeys );
       k2MD = keys: prev.__pscope.linkModules {
         modules = map ( k: final.${k}.module.outPath ) keys;
       };
     in {
-      inherit allRtKeys;
-      nodeModulesDir = k2MD allRtKeys;
-    } // ( lib.optionalAttrs ( ePrev.meta.hasBuild or true ) {
-      inherit allDevKeys;
+      nodeModulesDir = k2MD ePrev.meta.runtimeKeys;
+    } // ( lib.optionalAttrs ( ePrev.meta ? devDepKeys ) {
       nodeModulesDir-dev = k2MD allDevKeys;
     } ) );
     # Global Modules also need it but I have to unfuck the cycle chasing first.
