@@ -103,6 +103,7 @@
         };
       };
       inherit (final._node-pkg-set)
+        makeMetaSet
         makeOuterScope
         makeNodePkgSet
 
@@ -299,6 +300,7 @@
 
       # FIXME: this interface for handling `nodejs' input is hideous
       inherit (_node-pkg-set)
+        makeMetaSet
         makeOuterScope
         makeNodePkgSet
 

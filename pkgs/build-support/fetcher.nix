@@ -74,7 +74,7 @@ let
   # Ideally you would pre-fetch to define the derivation, then use
   # `nix-store --dump-db ...' or serialize this info with `toJSON' to stash the
   # info to optimize/purify future runs.
-  per2fetchArgs = { resolved, ... }@entry: let
+  per2fetchArgs = { resolved, ... } @ entry: let
     prefetched = if ( ! impure ) then {} else fetchTree bfr;
     nha = plockEntryHashAttr entry;
     # nixpkgs.fetchurl
@@ -125,7 +125,7 @@ let
   # redundantly implementing a lifecycle driver for local trees and git repos.
 
   # Git
-  peg2fetchArgs = { resolved, ... }@entry: let
+  peg2fetchArgs = { resolved, ... } @ entry: let
     # I'm pretty sure you can pass this "as is" to `fetchTree'.
     # I'm also pretty sure that Eelco implemented `fetchTree' and Flake refs
     # based on NPM's URIs to support Node.js at Target - the commonality is

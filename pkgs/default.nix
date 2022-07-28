@@ -157,6 +157,7 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
   ;
 
   inherit (_node-pkg-set)
+    makeMetaSet
     makeOuterScope
     makeNodePkgSet
 

@@ -41,6 +41,10 @@
 
 /* -------------------------------------------------------------------------- */
 
+
+  # TODO:
+  #   FIXME: `__entries' on pkgEnts doesn't exclude `__pscope'.
+
   inherit (lib.libmeta)
     extInfoExtras
     mkExtInfo
@@ -62,6 +66,22 @@
     "manifest"
     "packument"
   ];
+
+
+/* -------------------------------------------------------------------------- */
+
+  # XXX: Must be a regular `attrset' not a recursive one.
+  makeMetaSet = { __meta, ... } @ members: let
+    membersR = self:
+      ( builtins.mapAttrs ( _: v: v // { __pscope = self; } ) members ) // {
+        __meta = __meta // { __serial = false; };
+      };
+    extra = {
+      __entries = self: removeAttrs self ( extInfoExtras ++
+                                           ["__meta" "__pscope"] );
+      __new = self: lib.libmeta.mkExtInfo' extra;
+    };
+  in lib.libmeta.mkExtInfo' extra membersR;
 
 
 /* -------------------------------------------------------------------------- */
@@ -272,7 +292,7 @@
       entrySubtype = entType;
       entries = {
         __serial = false;
-        pl2 = pl2ent // { inherit pkey; };
+        pl2 = pl2ent // { inherit pkey lockDir; };
       } // ( lib.optionalAttrs localPath { inherit pjs; } );
     } // hasBuild' // hasPrepare' //
     ( lib.optionalAttrs hasBin { inherit (pl2ent) bin; } ) );
@@ -285,8 +305,8 @@
     plock           ? lib.importJSON' lockPath
   , lockDir         ? dirOf lockPath
   , lockPath        ? "${lockDir}/package-lock.json"
-  , metaSetOverlays ? []
   , metaEntOverlays ? []
+  , metaSetOverlays ? []
   , legacyPeerDeps  ? false
   , ignoreOptional  ? true  # THIS REFERS TO PEERS
   , forceRtDeps     ? []  # list of keys
@@ -373,28 +393,20 @@
       builtins.mapAttrs
         ( _: meta: extendWithDepKeys meta.entries.pl2.pkey meta )
         prev;
+
     ov = lib.composeManyExtensions ( metaSetOverlays ++
                                      [extendMetaSetWithDepKeys] );
     metaSet = let
       lst   = builtins.attrValues ents;
       keyed = map ( { key, ... } @ value: { name = key; inherit value; } ) lst;
       raw   = builtins.listToAttrs keyed;
-      mrec  = self:
-        ( builtins.mapAttrs ( _: v: v // { __pscope = self; } ) raw ) // {
-          __meta = {
-            __serial = false;
-            setFromType = "package-lock.json(v2)";
-            inherit plock lockDir lockPath metaSetOverlays metaEntOverlays
-                    legacyPeerDeps ignoreOptional forceRtDeps forceDevDeps;
-          };
-        };
-      extra = {
-        __entries = self: removeAttrs self ( extInfoExtras ++ ["__meta"] );
-        __new = self: lib.libmeta.mkExtInfo' extra;
+      __meta = {
+        setFromType = "package-lock.json(v2)";
+        inherit plock lockDir lockPath metaSetOverlays metaEntOverlays
+                legacyPeerDeps ignoreOptional forceRtDeps forceDevDeps;
       };
-      ext = lib.libmeta.mkExtInfo' extra mrec;
-    in ext.__extend ov;
-  in metaSet;
+    in makeMetaSet ( raw // { inherit __meta; } );
+  in metaSet.__extend ov;
 
 
 /* -------------------------------------------------------------------------- */
@@ -409,15 +421,15 @@
   } @ pl2ent: let
     meta = if pl2ent ? entryFromType then pl2ent else
            ( metaEntFromPlockV2 lockDir pkey pl2ent );
-    isTb = ( meta.entrySubtype == "registry-tarball" ) ||
-           ( meta.entrySubtype == "source-tarball" );
   in mkExtInfo ( self: {
     inherit version __pscope meta;
     inherit (meta) ident key;
     source = let
-      doFetch' = __pscope.__pscope.doFetch // { cwd = lockDir; };
+      doFetch' = __pscope.__pscope.doFetch // {
+        cwd = self.meta.entries.pl2.lockDir;
+      };
     in doFetch' self.meta.entries.pl2.pkey self.meta.entries.pl2;
-  } // ( lib.optionalAttrs isTb {
+  } // ( lib.optionalAttrs ( meta.sourceInfo.type == "tarball" ) {
     tarball = self.__pscope.__pscope.fetchurl {
       name = self.meta.names.registryTarball;
       inherit (self.meta.sourceInfo) url hash;
@@ -744,14 +756,15 @@
 # This file is only partially complete.
 in {
   inherit
+    makeMetaSet
     makeOuterScope
     makeNodePkgSet
 
     pkgEntFromPjs
     pkgEntriesFromPjs
 
-    metaEntriesFromPlockV2
     metaEntFromPlockV2
+    metaEntriesFromPlockV2
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
 
