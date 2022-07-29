@@ -455,10 +455,10 @@ let
       pinDep = ident: descriptor:
         if builtins.isString descriptor then pin ident else descriptor.version;
       rt' = lib.optionalAttrs ( dependencies != {} ) {
-        runtimeDepKeys = builtins.mapAttrs pinDep dependencies;
+        runtimeDepPins = builtins.mapAttrs pinDep dependencies;
       };
       dev' = lib.optionalAttrs ( devDependencies != {} ) {
-        devDepKeys = builtins.mapAttrs pinDep devDependencies;
+        devDepPins = builtins.mapAttrs pinDep devDependencies;
       };
     in { key = "${name}/${version}"; inherit name version; } // rt' // dev';
     pinned = builtins.mapAttrs pinEnt plock.packages;

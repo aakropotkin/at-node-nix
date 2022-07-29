@@ -311,60 +311,53 @@
   , forceDevDeps    ? []  # list of keys
   , ...
   } @ args: assert plock.lockfileVersion == 2; let
-
-    inherit (builtins) attrNames filter concatMap genericClosure;
-    lp = lib.libplock;
-
     ents = let
-      pkgEnts = builtins.mapAttrs ( metaEntFromPlockV2 lockDir ) plock.packages;
+      metaEnts = builtins.mapAttrs ( metaEntFromPlockV2 lockDir ) plock.packages;
       entOv   = lib.composeManyExtensions metaEntOverlays;
-      withOv  = builtins.mapAttrs ( _: e: e.__extend entOv ) pkgEnts;
-      final   = if metaEntOverlays != [] then withOv else pkgEnts;
+      withOv  = builtins.mapAttrs ( _: e: e.__extend entOv ) metaEnts;
+      final   = if metaEntOverlays != [] then withOv else metaEnts;
     in builtins.mapAttrs ( _: e: e.__entries ) final;
-
+    pinned = lib.libplock.pinVersionsFromLockV2 plock;
     addDirectDepKeys = from: meta: let
-      ent = meta.entries.pl2;
-      res = ident: lp.resolvePkgKeyFor { inherit plock from ent; } ident;
-      rt  = map res ( attrNames ( ent.dependencies or {} ) );
-      dev = map res ( attrNames ( ent.devDependencies or {} ) );
-      wantsDev =
-        ( builtins.elem meta.key forceDevDeps ) ||
-        ( ( meta.sourceInfo.type != "tarball" ) &&
-          ( meta.hasBuild or ( ent ? devDependencies ) ) );
-    in meta // { runtimeDepKeys = rt; } // lib.optionalAttrs wantsDev {
-      devDepKeys = dev;
-    };
-
-    entsDD = builtins.mapAttrs addDirectDepKeys ents;
+      pinnedAttrs = pinned.${meta.key};
+      wasEmpty =
+        ! ( ( pinnedAttrs ? runtimeDepPins ) || ( pinnedAttrs ? devDepPins ) );
+      wantsDev = ( pinnedAttrs ? devDepKeys ) &&
+                 ( ( builtins.elem meta.key forceDevDeps ) ||
+                   ( ( meta.sourceInfo.type != "tarball" ) && meta.hasBuild ) );
+      keyFields = { inherit (pinnedAttrs) runtimeDepPins; } //
+        ( lib.optionalAttrs wantsDev { inherit (pinnedAttrs) devDepPins; } );
+    in if wasEmpty then meta else meta // keyFields;
+    withPinsList =
+      builtins.attrValues ( builtins.mapAttrs addDirectDepKeys ents );
     topo = let
-      bDependsOnA = a: b:
-        builtins.elem a.key ( b.runtimeDepKeys ++ ( b.devDepKeys or [] ) );
-      sorted = lib.toposort bDependsOnA ( builtins.attrValues entsDD );
+      bDependsOnA = a: b: let
+        bDeps = b.runtimeDepPins // ( b.devDepPins or {} );
+      in ( b ? runtimeDepPins ) && ( bDeps ? ${a.ident} ) &&
+         ( bDeps.${a.ident} == a.version );
+      sorted = let
+        full = lib.toposort bDependsOnA withPinsList;
+        fullKeyed = builtins.mapAttrs ( _: map ( x: x.key ) ) full;
+      in fullKeyed;
       msgCycle = "A cycle exists among packages: " +
-        ( builtins.concatStringsSep " " ( map ( x: x.key ) sorted.cycle ) );
+                 ( builtins.concatStringsSep " " sorted.cycle );
       msgLoop = "Loops exists among packages: " +
-        ( builtins.concatStringsSep " " ( map ( x: x.key ) sorted.loops ) );
+                ( builtins.concatStringsSep " " sorted.loops );
       msg = if ( sorted ? cycle ) && ( sorted ? loops ) then
         msgCycle + "\n" + msgLoop else if ( sorted ? cycle ) then msgCycle else
           if ( sorted ? loops ) then msgLoop else null;
-    in if msg != null then throw msg else sorted.result;
-
-    entsRD = /* FIXME ADD RECURSIVE DEPS */ null;
-
-    ov = lib.composeManyExtensions metaSetOverlays;
-
+    in if msg != null then builtins.trace msg sorted else sorted;
     metaSet = let
-      lst   = builtins.attrValues ents;
-      keyed = map ( { key, ... } @ value: { name = key; inherit value; } ) lst;
-      raw   = builtins.listToAttrs keyed;
+      entsDD = let
+        nv = { key, ... } @ value: { inherit value; name = key; };
+      in builtins.listToAttrs ( map nv withPinsList );
       __meta = {
         setFromType = "package-lock.json(v2)";
         inherit plock lockDir lockPath metaSetOverlays metaEntOverlays
-                forceRtDeps forceDevDeps;
+                forceRtDeps forceDevDeps topo;
       };
-    in makeMetaSet ( raw // { inherit __meta; } );
-  #in metaSet.__extend ov;
-  in topo;
+    in makeMetaSet ( entsDD // { inherit __meta; } );
+  in metaSet.__extend ( lib.composeManyExtensions metaSetOverlays );
 
 
 /* -------------------------------------------------------------------------- */
