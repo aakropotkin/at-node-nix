@@ -443,8 +443,32 @@ let
 
 /* -------------------------------------------------------------------------- */
 
+  pinVersionsFromLockV2 = plock: let
+    pinEnt = from: {
+      version
+    , dependencies    ? {}
+    , devDependencies ? {}
+    , name            ? lib.yank ".*node_modules/(.*)" from
+    , ...
+    } @ ent: let
+      pin = resolvePkgVersionFor { inherit from plock; };
+      pinDep = ident: descriptor:
+        if builtins.isString descriptor then pin ident else descriptor.version;
+      rt' = lib.optionalAttrs ( dependencies != {} ) {
+        runtimeDepKeys = builtins.mapAttrs pinDep dependencies;
+      };
+      dev' = lib.optionalAttrs ( devDependencies != {} ) {
+        devDepKeys = builtins.mapAttrs pinDep devDependencies;
+      };
+    in { key = "${name}/${version}"; inherit name version; } // rt' // dev';
+    pinned = builtins.mapAttrs pinEnt plock.packages;
+    renameFromKey = { key, ... } @ value: { inherit value; name = key; };
+    renamed =
+      builtins.listToAttrs ( map renameFromKey ( builtins.attrValues pinned ) );
+  in renamed;
 
-# pinned = builtins.listToAttrs ( map ( { key, ... } @ value: { inherit value; name = key; } ) ( builtins.attrValues ( let res = from: { version, dependencies ? {}, devDependencies ? {}, name ? lib.yank ".*node_modules/(.*)" from, ... } @ ent: let rf = lp.resolvePkgVersionFor { inherit from plock; }; r = i: d: if builtins.isString d then rf i else d.version; in { key = "${name}/${version}"; inherit name version; runtimeDepKeys = builtins.mapAttrs r dependencies; devDepKeys = builtins.mapAttrs r devDependencies; }; in builtins.mapAttrs res plock.packages ) ) )
+
+/* -------------------------------------------------------------------------- */
 
 in {
 
@@ -500,6 +524,8 @@ in {
     depsToPkgAttrsFor'
     depsToPkgAttrsFor
     runtimeDepsToPkgAttrsFor
+
+    pinVersionsFromLockV2
 
     manifestInfoFromPlockV2
     fromPlockV2
