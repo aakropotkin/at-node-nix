@@ -200,14 +200,68 @@ let
     tgt = builtins.filter ( x: x.version == version ) realsK;
   in builtins.head tgt;
 
-  resolveDepFor = plock: from: name: let
-    isSub = k: _: lib.test "${from}/node_modules/.*${name}" k;
+  resolveDepFor = plock: from: ident: let
+    isSub = k: _: lib.test "${from}/node_modules/.*${ident}" k;
     subs = lib.filterAttrs isSub plock.packages;
-    path = if subs == {} then "node_modules/${name}" else
-           ( head ( attrNames subs ) );
+    parent = lib.yank "(.*)/node_modules/(@[^/]+/)?[^/]+" from;
+    fromParent = resolveDepFor plock parent ident;
+    path = if subs != {} then ( head ( attrNames subs ) ) else
+      if parent != null then null else "node_modules/${ident}";
     entry = realEntry plock path;
-  in { resolved = path; value = entry; };
+  in if path == null then fromParent else { resolved = path; value = entry; };
 
+  resolvePkgKeyFor = {
+    plock
+  , from   ? ""
+  , parent ?  let
+      _maybeParent = lib.yank "(.*)/node_modules/(@[^/]+/)?[^/]+" from;
+    in if _maybeParent == null then "" else _maybeParent
+  , ent    ? realEntry plock from
+  } @ ctx: ident: let
+    fromTop = let
+      fromTopNm = ( getTopLevelEntry plock ident ).version;
+      _version  = if ident == plock.name then plock.version else fromTopNm;
+    in "${ident}/${_version}";
+    fromParent =
+      if parent != ""
+      then ( resolvePkgKeyFor { inherit plock; from = parent; } ident )
+      else fromTop;
+    sub = ent.dependencies.${ident}    or
+          ent.dependencies.${ident}    or
+          ent.devDependencies.${ident} or
+          ent.dependencies.${ident}    or null;
+    version =
+      if ( sub == null ) || ( builtins.isString sub ) then null else
+      if ( sub.link or false ) then plock.packages.${sub.resolved}.version else
+      sub.version;
+    fromSub = "${ident}/${version}";
+  in if from == "" then fromTop else
+     if ent.link or false then resolvePkgKeyFor {
+       inherit plock; from = ent.resolved;
+     } ident else if version != null then fromSub else fromParent;
+
+  splitNmToAttrPath = nmpath: let
+    sp = builtins.tail ( lib.splitString "node_modules/" nmpath );
+    stripTrailingSlash = s: let
+      m = lib.yank "(.*[^/])/?" s;
+    in if m == null then s else m;
+  in map stripTrailingSlash sp;
+
+  resolvePkgVersionFor = {
+    plock
+  , from       ? ""
+  , parentPath ? lib.take ( ( builtins.length fromPath ) - 1 ) fromPath
+  , fromIdent  ? if from == "" then plock.name else
+                 lib.yank ".*node_modules/(.*)" from
+  , fromPath   ?
+    if ctx ? parentPath then ( parentPath ++ [fromIdent] ) else
+    ( splitNmToAttrPath from )
+  , ent        ? lib.getAttrFromPath fromPath plock.dependencies
+  } @ ctx: ident: let
+    depHasSubs = builtins.isAttrs ent.dependencies.${ident};
+    depWasNormalized = ent.dependencies ? ${ident} && depHasSubs;
+  in if depWasNormalized then ent.dependencies.${ident}.version else
+     resolvePkgVersionFor { inherit plock; fromPath = parentPath; } ident;
 
   depClosureFor' = ignoreStartPeers: depFields: plock: from: let
     operator = { key, ... }@attrs: let
@@ -419,21 +473,29 @@ in {
     resolvedFetchersFromLock
     resolvedFetcherTree
     toposortDeps
+
     realEntry
     getTopLevelEntry
     entriesByName'
     entriesByName
+
     resolveDepFor
     resolveNameVersion
+    resolvePkgKeyFor
+    resolvePkgVersionFor
+    splitNmToAttrPath
+
     depClosureFor'
     depClosureFor
     runtimeClosureFor
     depClosureToPkgAttrsFor'
     depClosureToPkgAttrsFor
     runtimeClosureToPkgAttrsFor
+
     depsToPkgAttrsFor'
     depsToPkgAttrsFor
     runtimeDepsToPkgAttrsFor
+
     manifestInfoFromPlockV2
     fromPlockV2
   ;

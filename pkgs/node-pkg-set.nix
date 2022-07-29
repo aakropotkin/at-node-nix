@@ -307,95 +307,52 @@
   , lockPath        ? "${lockDir}/package-lock.json"
   , metaEntOverlays ? []
   , metaSetOverlays ? []
-  , legacyPeerDeps  ? false
-  , ignoreOptional  ? true  # THIS REFERS TO PEERS
   , forceRtDeps     ? []  # list of keys
   , forceDevDeps    ? []  # list of keys
   , ...
   } @ args: assert plock.lockfileVersion == 2; let
+
+    inherit (builtins) attrNames filter concatMap genericClosure;
     lp = lib.libplock;
+
     ents = let
       pkgEnts = builtins.mapAttrs ( metaEntFromPlockV2 lockDir ) plock.packages;
       entOv   = lib.composeManyExtensions metaEntOverlays;
       withOv  = builtins.mapAttrs ( _: e: e.__extend entOv ) pkgEnts;
-    in if metaEntOverlays != [] then withOv else pkgEnts;
-    inherit (builtins) attrNames filter concatMap genericClosure;
-    getPeerIdsFromFor = from: i: let
-      e         = lp.resolveDepFor plock from i;
-      pdm       = e.peerDependenciesMeta or {};
-      doIgnores = ignoreOptional && ( e ? peerDependenciesMeta );
-      flt       = p: ! ( pdm.${p}.optional or false );
-      peerIds   = attrNames e.peerDependencies;
-      keeps     = filter flt peerIds;
-      peers     = if ! ( e ? peerDependencies ) then [] else
-                  if doIgnores then keeps else peerIds;
-    in peers;
-    # FIXME: handle optional direct deps
-    # FIXME: the way you are resolving using the key names for subfields
-    #        ( written in `lib.libplock' ) is inefficient compared to referncing
-    #        an entry's `dependency' and `requires' fields.
-    #        These will include `resolved', `dev', etc fields nested in an
-    #        attrset as opposed to a regular descriptor - if you just find a
-    #        descriptor you search "../dependencies", then "../../dependencies"
-    #        just like the regular resolution algo.
-    directRtResolvesFor = from: let
-      direct = attrNames ( ( lp.realEntry plock from ).dependencies or {} );
-      getPeerIdsFor = getPeerIdsFromFor from;
-      directPeerIds = concatMap getPeerIdsFor direct;
-      allDirectIds  = lib.unique ( direct ++ directPeerIds );
-    in map ( i: ( lp.resolveDepFor plock from i ).resolved ) allDirectIds;
-    rtResolvesClosureFor = from: let
-      getKeyed = f: { key = f; resolves = directRtResolvesFor f; };
-      closed = genericClosure {
-        startSet = [( getKeyed from)];
-        operator = { key, resolves }: map getKeyed resolves;
-      };
-    in builtins.filter ( k: k != from ) ( map ( x: x.key ) closed );
-    toPkgSetKey = r: let
-      e = if r == "" then plock else plock.packages.${r};
-      name = e.name or ( lib.yank ".*node_modules/(.*)" r );
-    in "${name}/${e.version}";
-    rtPkgSetKeyClosureFor = from: map toPkgSetKey ( rtResolvesClosureFor from );
-    devResolvesFor = from: let
-      dev = attrNames ( ( lp.realEntry plock from ).devDependencies or {} );
-      getPeerIdsFor = getPeerIdsFromFor from;
-      devPeerIds = concatMap getPeerIdsFor dev;
-      allDevIds = lib.unique ( dev ++ devPeerIds );
-    in map ( i: ( lp.resolveDepFor plock from i ).resolved ) allDevIds;
-    devResolvesClosureFor = from: let
-      devres = devResolvesFor from;
-      getKeyed = f: { key = f; resolves = directRtResolvesFor f; };
-      closed = genericClosure {
-        startSet = map getKeyed devres;
-        operator = { key, resolves }: map getKeyed resolves;
-      };
-    in builtins.filter ( k: k != from ) ( map ( x: x.key ) closed );
-    devPkgSetKeyClosureFor = from:
-      map toPkgSetKey ( devResolvesClosureFor from );
-    extendWithDepKeys = from: meta: let
-      needsDev =
-        ( builtins.elem meta.key forceRtDeps ) ||
-        ( ( meta.sourceInfo.type != "tarball" ) &&
-          ( meta.hasBuild or ( meta.sourceInfo.type == "git" ) ) );
-      needsDeps =
-        ( builtins.elem meta.key forceDevDeps ) || needsDev ||
-        ( meta.hasInstallScript or ( ( meta.sourceInfo.type != "tarball" ) &&
-                                     ( meta.hasPrepare or false ) ) );
-      rt' = lib.optionalAttrs needsDeps {
-        runtimeDepKeys = rtPkgSetKeyClosureFor from;
-      };
-      dev' = lib.optionalAttrs needsDev {
-        devDepKeys = devPkgSetKeyClosureFor from;
-      };
-    in if ! ( needsDev || needsDeps ) then meta else
-       meta.__extend ( _: _: rt' // dev' );
-    extendMetaSetWithDepKeys = final: prev:
-      builtins.mapAttrs
-        ( _: meta: extendWithDepKeys meta.entries.pl2.pkey meta )
-        prev;
+      final   = if metaEntOverlays != [] then withOv else pkgEnts;
+    in builtins.mapAttrs ( _: e: e.__entries ) final;
 
-    ov = lib.composeManyExtensions ( metaSetOverlays ++
-                                     [extendMetaSetWithDepKeys] );
+    addDirectDepKeys = from: meta: let
+      ent = meta.entries.pl2;
+      res = ident: lp.resolvePkgKeyFor { inherit plock from ent; } ident;
+      rt  = map res ( attrNames ( ent.dependencies or {} ) );
+      dev = map res ( attrNames ( ent.devDependencies or {} ) );
+      wantsDev =
+        ( builtins.elem meta.key forceDevDeps ) ||
+        ( ( meta.sourceInfo.type != "tarball" ) &&
+          ( meta.hasBuild or ( ent ? devDependencies ) ) );
+    in meta // { runtimeDepKeys = rt; } // lib.optionalAttrs wantsDev {
+      devDepKeys = dev;
+    };
+
+    entsDD = builtins.mapAttrs addDirectDepKeys ents;
+    topo = let
+      bDependsOnA = a: b:
+        builtins.elem a.key ( b.runtimeDepKeys ++ ( b.devDepKeys or [] ) );
+      sorted = lib.toposort bDependsOnA ( builtins.attrValues entsDD );
+      msgCycle = "A cycle exists among packages: " +
+        ( builtins.concatStringsSep " " ( map ( x: x.key ) sorted.cycle ) );
+      msgLoop = "Loops exists among packages: " +
+        ( builtins.concatStringsSep " " ( map ( x: x.key ) sorted.loops ) );
+      msg = if ( sorted ? cycle ) && ( sorted ? loops ) then
+        msgCycle + "\n" + msgLoop else if ( sorted ? cycle ) then msgCycle else
+          if ( sorted ? loops ) then msgLoop else null;
+    in if msg != null then throw msg else sorted.result;
+
+    entsRD = /* FIXME ADD RECURSIVE DEPS */ null;
+
+    ov = lib.composeManyExtensions metaSetOverlays;
+
     metaSet = let
       lst   = builtins.attrValues ents;
       keyed = map ( { key, ... } @ value: { name = key; inherit value; } ) lst;
@@ -403,10 +360,11 @@
       __meta = {
         setFromType = "package-lock.json(v2)";
         inherit plock lockDir lockPath metaSetOverlays metaEntOverlays
-                legacyPeerDeps ignoreOptional forceRtDeps forceDevDeps;
+                forceRtDeps forceDevDeps;
       };
     in makeMetaSet ( raw // { inherit __meta; } );
-  in metaSet.__extend ov;
+  #in metaSet.__extend ov;
+  in topo;
 
 
 /* -------------------------------------------------------------------------- */
