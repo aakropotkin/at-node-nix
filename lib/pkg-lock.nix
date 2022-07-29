@@ -254,12 +254,14 @@ let
   , fromIdent  ? if from == "" then plock.name else
                  lib.yank ".*node_modules/(.*)" from
   , fromPath   ?
-    if ctx ? parentPath then ( parentPath ++ [fromIdent] ) else
-    ( splitNmToAttrPath from )
-  , ent        ? lib.getAttrFromPath fromPath plock.dependencies
+      if ctx ? parentPath then ( parentPath ++ [fromIdent] ) else
+      ( splitNmToAttrPath from )
+  , ent ? if fromPath == [] then plock else
+    lib.getAttrFromPath ( lib.intersperse "dependencies" fromPath )
+                        plock.dependencies
   } @ ctx: ident: let
     depHasSubs = builtins.isAttrs ent.dependencies.${ident};
-    depWasNormalized = ent.dependencies ? ${ident} && depHasSubs;
+    depWasNormalized = ( ent ? dependencies.${ident} ) && depHasSubs;
   in if depWasNormalized then ent.dependencies.${ident}.version else
      resolvePkgVersionFor { inherit plock; fromPath = parentPath; } ident;
 
@@ -440,6 +442,9 @@ let
 
 
 /* -------------------------------------------------------------------------- */
+
+
+# pinned = builtins.listToAttrs ( map ( { key, ... } @ value: { inherit value; name = key; } ) ( builtins.attrValues ( let res = from: { version, dependencies ? {}, devDependencies ? {}, name ? lib.yank ".*node_modules/(.*)" from, ... } @ ent: let rf = lp.resolvePkgVersionFor { inherit from plock; }; r = i: d: if builtins.isString d then rf i else d.version; in { key = "${name}/${version}"; inherit name version; runtimeDepKeys = builtins.mapAttrs r dependencies; devDepKeys = builtins.mapAttrs r devDependencies; }; in builtins.mapAttrs res plock.packages ) ) )
 
 in {
 
