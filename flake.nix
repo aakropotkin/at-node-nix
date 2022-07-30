@@ -96,15 +96,16 @@
         inherit (final) runBuild genericInstall packNodeTarballAsIs;
         inherit (pkgsFor) stdenv jq xcbuild linkFarm untarSanPerms;
         inherit (final._fetcher) typeOfEntry;
-        fetchurl = final.lib.fetchurlDrv;  # For tarballs without unpacking
-        doFetch = final._fetcher.fetcher {
+        fetcher = final._fetcher.fetcher {
           cwd = throw "Override `cwd' to use local fetchers";  # defer to call-site
-          preferBuiltins = true;
+          preferBuiltins  = true;
+          preferFetchTree = true;
         };
       };
       inherit (final._node-pkg-set)
         makeMetaSet
         makeOuterScope
+        makeNodePkgSet'
         makeNodePkgSet
 
         pkgEntFromPjs
@@ -157,8 +158,16 @@
         inherit (final) lib;
         inherit (pkgsFor) fetchurl fetchgit fetchzip;
       } )
-        per2fetchArgs
         typeOfEntry
+        fetcherForType
+        plock2TbFetchArgs
+        plock2GitFetchArgs
+        plock2LinkFetchArgs
+        plock2PathFetchArgs
+        plock2EntryFetchArgs    # This is the router.
+        defaultFetchers
+        getPreferredFetchers
+        fetcher
       ;
 
       inherit ( import ./pkgs/build-support/plock-to-node-modules-dir.nix {
@@ -259,10 +268,10 @@
         inherit (ak-nix.trivial.${system}) untarSanPerms;
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
         inherit (_fetcher) typeOfEntry;
-        fetchurl = lib.fetchurlDrv;  # For tarballs without unpacking
-        doFetch = _fetcher.fetcher {
+        fetcher = _fetcher.fetcher {
           cwd = throw "Override `cwd' to use local fetchers";  # defer to call-site
-          preferBuiltins = true;
+          preferBuiltins  = true;
+          preferFetchTree = true;
         };
       };
 
@@ -302,6 +311,7 @@
       inherit (_node-pkg-set)
         makeMetaSet
         makeOuterScope
+        makeNodePkgSet'
         makeNodePkgSet
 
         pkgEntFromPjs
@@ -350,8 +360,16 @@
       ;
 
       inherit (_fetcher)
-        per2fetchArgs
         typeOfEntry
+        fetcherForType
+        plock2TbFetchArgs
+        plock2GitFetchArgs
+        plock2LinkFetchArgs
+        plock2PathFetchArgs
+        plock2EntryFetchArgs    # This is the router.
+        defaultFetchers
+        getPreferredFetchers
+        fetcher
       ;
 
       inherit (_plock2nm)

@@ -1,7 +1,6 @@
 { lib
 , typeOfEntry
-, doFetch      # A configured `fetcher' from `./build-support/fetcher.nix'.
-, fetchurl       ? lib.fetchurlDrv
+, fetcher      # A configured `fetcher' from `./build-support/fetcher.nix'.
 , buildGyp
 , evalScripts
 , genericInstall
@@ -99,13 +98,12 @@
       core = {
         inherit (globalAttrs)
           lib
-          fetchurl
           linkFarm
           stdenv
           xcbuild
           nodejs
           jq
-          doFetch
+          fetcher
           untarSanPerms
           linkModules
           runBuild
@@ -120,7 +118,7 @@
   in lib.libmeta.mkExtInfo' extra membersR;
 
 
-  makeNodePkgSet = members: let
+  makeNodePkgSet' = { pkgSetOverlays ? pkgSetDrvsOverlay }: members: let
     extra = {
       __entries = self: removeAttrs self ( extInfoExtras ++ ["__pscope"] );
       __new = self: lib.libmeta.mkExtInfo' extra;
@@ -130,8 +128,13 @@
       addCore = prev: { __pscope = prev.__pscope or core.__pscope; };
       withCoreOv = lib.fixedPoints.extends ( final: addCore ) members;
     in if builtins.isFunction members then withCoreOv else ( core // members );
-    withoutDrvs = lib.libmeta.mkExtInfo' extra membersR;
-  in withoutDrvs.__extend pkgSetDrvsOverlay;
+    nps = lib.libmeta.mkExtInfo' extra membersR;
+    ov = if builtins.isList pkgSetOverlays
+         then lib.composeManyExtensions pkgSetOverlays
+         else pkgSetOverlays;
+  in if pkgSetOverlays == [] then nps else nps.__extend ov;
+
+  makeNodePkgSet = makeNodePkgSet' {};
 
 
 /* -------------------------------------------------------------------------- */
@@ -162,7 +165,7 @@
     # We want to hit the `dirFetcher', we could invoke it directly, but we'll
     # stick to the "real interface" which will recognize the empty set as a
     # "path entry" ( it is based on `package-lock(v2)' style entries ).
-    source = ( __pscope.__pscope.doFetch // { cwd = pjsDir; } ) "" {};
+    source = ( __pscope.__pscope.fetcher // { cwd = pjsDir; } ) "" {};
     bin = let
       # XXX: This is a reserved value.
       # It helps us avoid dynamically creating a list of bins at build time.
@@ -372,23 +375,25 @@
   } @ pl2ent: let
     meta = if pl2ent ? entryFromType then pl2ent else
            ( metaEntFromPlockV2 lockDir pkey pl2ent );
-  in mkExtInfo ( self: {
+  in mkExtInfo ( self: let
+    tb' = lib.optionalAttrs ( meta.sourceInfo.type == "tarball" ) {
+      # FIXME: The fetcher routines weren't originally designed for this, and
+      # I agree that this is ugly.
+      # Refactor in the future.
+      tarball = self.__pscope.__pscope.fetcher.urlFetcher {
+        name = self.meta.names.registryTarball;
+        inherit (self.meta.sourceInfo) url hash;
+        unpack = false;
+      };
+      source = unpackSafe self;
+    };
+  in {
     inherit version __pscope meta;
     inherit (meta) ident key;
     source = let
-      doFetch' = __pscope.__pscope.doFetch // {
-        cwd = self.meta.entries.pl2.lockDir;
-      };
-    in doFetch' self.meta.entries.pl2.pkey self.meta.entries.pl2;
-  } // ( lib.optionalAttrs ( meta.sourceInfo.type == "tarball" ) {
-    tarball = self.__pscope.__pscope.fetchurl {
-      name = self.meta.names.registryTarball;
-      inherit (self.meta.sourceInfo) url hash;
-      unpack = false;
-    };
-  } // ( lib.optionalAttrs ( meta.useSafeUnpack or false ) {
-    source = unpackSafe self;
-  } ) ) );
+      fetcherFor = __pscope.__pscope.fetcher // { cwd = lockDir; };
+    in fetcherFor self.meta.entries.pl2.pkey self.meta.entries.pl2;
+  } // tb' );
 
 
 /* -------------------------------------------------------------------------- */
@@ -410,7 +415,10 @@
     pl2entsR = let
       ents = pl2metas.__entries;
     in self: builtins.mapAttrs ( mkPkgEnt self ) ents;
-    nodePkgs = makeNodePkgSet ( pl2entsR nodePkgs );
+    nodePkgs = let
+      mnps = if ! ( args ? pkgSetOverlays ) then makeNodePkgSet else
+             makeNodePkgSet' { inherit (args) pkgSetOverlays; };
+    in mnps ( pl2entsR nodePkgs );
   in nodePkgs;
 
 
@@ -692,23 +700,13 @@
 
 /* -------------------------------------------------------------------------- */
 
-  mkPkgEntry = {
-    ident
-  , version
-  , key           ? ident + "/" + version
-  , entryFromType ? null
-  } @ fields: let
-  in {};
-
-
-/* -------------------------------------------------------------------------- */
-
 # FIXME: This is only exposed right now for testing.
 # This file is only partially complete.
 in {
   inherit
     makeMetaSet
     makeOuterScope
+    makeNodePkgSet'
     makeNodePkgSet
 
     pkgEntFromPjs

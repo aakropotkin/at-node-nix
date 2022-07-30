@@ -45,6 +45,21 @@ let
      if isSrcTb then "source-tarball"   else
      throw "(typeOfEntry) Unrecognized entry type: ${toJSON entry}";
 
+  fetcherForType = {
+    tarballFetcher
+  , urlFetcher
+  , gitFetcher
+  , linkFetcher
+  , dirFetcher
+  , ...
+  } @ config: type:
+    if type == "symlink"          then config.linkFetcher     else
+    if type == "path"             then config.dirFetcher      else
+    if type == "git"              then config.gitFetcher      else
+    if type == "registry-tarball" then config.tarballFetcher  else
+    if type == "source-tarball"   then config.tarballFetcher  else
+    throw "(fetcher:doFetch) Unrecognized entry type: ${type}";
+
 
 /* -------------------------------------------------------------------------- */
 
@@ -74,7 +89,7 @@ let
   # Ideally you would pre-fetch to define the derivation, then use
   # `nix-store --dump-db ...' or serialize this info with `toJSON' to stash the
   # info to optimize/purify future runs.
-  per2fetchArgs = { resolved, ... } @ entry: let
+  plock2TbFetchArgs = { resolved, ... } @ entry: let
     prefetched = if ( ! impure ) then {} else fetchTree bfr;
     nha = plockEntryHashAttr entry;
     # nixpkgs.fetchurl
@@ -90,6 +105,8 @@ let
     bfr = { type = "tarball"; url = resolved; };  # XXX: Impure
     # builtins.fetchTarball
     bft = { url = resolved; };                    # XXX: Impure
+    # fetchurlDrv
+    lfu = { url = resolved; unpack = false; } // nha;
     flake = bfr // { flake = false; };
     impureArgs = {
       nixpkgs.fetchurl      = nfu;
@@ -98,6 +115,7 @@ let
       builtins.fetchTree    = bfr   // { inherit (prefetched) narHash; };
       builtins.fetchTarball = bft   // { sha256 = prefetched.narHash; };
       flake                 = flake // { inherit (prefetched) narHash; };
+      lib.fetchurlDrv       = lfu;
     };
     pureArgs = {
       nixpkgs.fetchurl      = nfu;
@@ -105,6 +123,7 @@ let
       builtins.fetchTree    = bfr;
       builtins.fetchTarball = bft;
       inherit flake;
+      lib.fetchurlDrv       = lfu;
     };
   in if impure then impureArgs else pureArgs;
 
@@ -125,7 +144,7 @@ let
   # redundantly implementing a lifecycle driver for local trees and git repos.
 
   # Git
-  peg2fetchArgs = { resolved, ... } @ entry: let
+  plock2GitFetchArgs = { resolved, ... } @ entry: let
     # I'm pretty sure you can pass this "as is" to `fetchTree'.
     # I'm also pretty sure that Eelco implemented `fetchTree' and Flake refs
     # based on NPM's URIs to support Node.js at Target - the commonality is
@@ -197,9 +216,9 @@ let
   #       For this same reason, we strongly recommend that you explicitly set
   #       `cwd' because relying on the default of `PWD' makes a BIG assumption,
   #       which is that all of these paths are locally available.
-  pkp2fetchArgs = {
+  plock2PathFetchArgs = {
     cwd ? ( if impure then builtins.getEnv "PWD" else
-          throw "(pkp2fetchArgs) Cannot determine CWD to resolve path URIs" )
+          throw "(plock2PathFetchArgs) Cannot determine CWD to resolve path URIs" )
   , key # relative path
   }: let
     cwd' = assert lib.libpath.isAbspath cwd; head ( match "(.*[^/])/?" cwd );
@@ -218,23 +237,24 @@ let
   # NOTE: This fetcher triggers additional lifecycle routines that are not
   #       run for a regular "node_modules/<path>" entry.
   #       We do not trigger life-cycle here, and defer to the caller.
-  pel2fetchArgs = {
+  plock2LinkFetchArgs = {
     cwd ? ( if impure then builtins.getEnv "PWD" else
-          throw "(pel2fetchArgs) Cannot determine CWD to resolve link URIs" )
-  }: { resolved, ... }: pkp2fetchArgs { inherit cwd; key = resolved; };
+          throw "(plock2LinkFetchArgs) Cannot determine CWD to resolve link URIs" )
+  }: { resolved, ... }: plock2PathFetchArgs { inherit cwd; key = resolved; };
 
 
 /* -------------------------------------------------------------------------- */
 
-  pke2fetchArgs = cwd: key: entry: let
+  plock2EntryFetchArgs = cwd: key: entry: let
     type = typeOfEntry entry;
     cwda = if cwd == null then {} else { inherit cwd; };
-  in if type == "symlink" then pel2fetchArgs cwda entry                   else
-     if type == "path"    then pkp2fetchArgs ( { inherit key; } // cwda ) else
-     if type == "git"     then peg2fetchArgs entry                        else
-     if type == "registry-tarball" then per2fetchArgs entry               else
-     if type == "source-tarball" then per2fetchArgs entry                 else
-     throw "(pke2fetchArgs) Unrecognized entry type for: ${key}";
+    pathArgs = ( { inherit key; } // cwda );
+  in if type == "symlink" then plock2LinkFetchArgs cwda entry   else
+     if type == "path"    then plock2PathFetchArgs pathArgs     else
+     if type == "git"     then plock2GitFetchArgs entry         else
+     if type == "registry-tarball" then plock2TbFetchArgs entry else
+     if type == "source-tarball" then plock2TbFetchArgs entry   else
+     throw "(plock2EntryFetchArgs) Unrecognized entry type for: ${key}";
 
 
 /* -------------------------------------------------------------------------- */
@@ -242,30 +262,39 @@ let
   # FIXME: For local paths, use `nix-gitignore' or use `fetchTree' at the repo's
   #        top level so that you properly scrub gitignored files.
   # XXX: Handle `.npmignore' files? ( seriously fuck that feature )
-  defaultFetchers = pb: pr: let
+  defaultFetchers = {
     defaultFetchTree = {
-      urlFetcher  = fa: fetchTree ( fa.builtins.fetchTree or fa );
-      gitFetcher  = fa: fetchTree ( fa.builtins.fetchTree or fa );
-      linkFetcher = fa: fetchTree ( fa.builtins.fetchTree or fa );
-      dirFetcher  = fa: fetchTree ( fa.builtins.fetchTree or fa );
+      urlFetcher     = fa: fetchurlDrv ( fa.lib.fetchurlDrv or fa );
+      tarballFetcher = fa: fetchTree ( fa.builtins.fetchTree or fa );
+      gitFetcher     = fa: fetchTree ( fa.builtins.fetchTree or fa );
+      linkFetcher    = fa: fetchTree ( fa.builtins.fetchTree or fa );
+      dirFetcher     = fa: fetchTree ( fa.builtins.fetchTree or fa );
     };
     defaultBuiltins = {
       # FIXME: Prefer `fetchTarball' in impure mode
-      urlFetcher  = fa: builtins.fetchurl ( fa.builtins.fetchurl or fa );
-      gitFetcher  = fa: builtins.fetchGit ( fa.builtins.fetGit   or fa );
-      linkFetcher = fa: builtins.path     ( fa.builtins.path     or fa );
-      dirFetcher  = fa: builtins.path     ( fa.builtins.path     or fa );
+      urlFetcher     = fa: fetchurlDrv ( fa.lib.fetchurlDrv or fa );
+      tarballFetcher = fa: builtins.fetchurl ( fa.builtins.fetchurl or fa );
+      gitFetcher     = fa: builtins.fetchGit ( fa.builtins.fetchGit or fa );
+      linkFetcher    = fa: builtins.path     ( fa.builtins.path     or fa );
+      dirFetcher     = fa: builtins.path     ( fa.builtins.path     or fa );
     };
     defaultNixpkgs = {
       # FIXME: Prefer `fetchzip' in impure mode
-      urlFetcher  = fa: fetchurl      ( fa.nixpkgs.fetchurl or fa );
-      gitFetcher  = fa: fetchgit      ( fa.nixpkgs.fetchgit or fa );
-      linkFetcher = fa: builtins.path ( fa.builtins.path    or fa );
-      dirFetcher  = fa: builtins.path ( fa.builtins.path    or fa );
+      urlFetcher     = fa: fetchurl ( fa.nixpkgs.fetchurl or fa );
+      tarballFetcher = fa: fetchurl ( fa.nixpkgs.fetchurl or fa );
+      gitFetcher     = fa: fetchgit ( fa.nixpkgs.fetchgit or fa );
+      linkFetcher    = fa: builtins.path        ( fa.builtins.path    or fa );
+      dirFetcher     = fa: builtins.path        ( fa.builtins.path    or fa );
     };
-  in if pr then defaultFetchTree else
-     if pb then defaultBuiltins  else
-     defaultNixpkgs;
+  };
+
+  getPreferredFetchers = preferBuiltins: preferFetchTree:
+     if preferFetchTree then defaultFetchers.defaultFetchTree else
+     if preferBuiltins  then defaultFetchers.defaultBuiltins  else
+     defaultFetchers.defaultNixpkgs;
+
+
+/* -------------------------------------------------------------------------- */
 
   # I'll admit that I'm not in love with this.
   # It's definitely appealing to simply say "just use `fetchTree'", but we know
@@ -281,31 +310,35 @@ let
     cwd             # Directory containing `package-lock.json' used to realpath
   , preferBuiltins  ? false
   , preferFetchTree ? preferBuiltins
+  , tarballFetcher  ? null
   , urlFetcher      ? null
   , gitFetcher      ? null
   , linkFetcher     ? null
   , dirFetcher      ? null
+  , simple          ? false  # Omits `fetchInfo' in resulting attrset
   } @ cfgArgs: let
-    defaults = defaultFetchers preferBuiltins preferFetchTree;
+    defaults = getPreferredFetchers preferBuiltins preferFetchTree;
     config = {
       inherit cwd;
-      urlFetcher  = cfgArgs.urlFetcher  or defaults.urlFetcher;
-      gitFetcher  = cfgArgs.gitFetcher  or defaults.gitFetcher;
-      linkFetcher = cfgArgs.linkFetcher or defaults.linkFetcher;
-      dirFetcher  = cfgArgs.dirFetcher  or defaults.dirFetcher;
+      urlFetcher     = cfgArgs.urlFetcher     or defaults.urlFetcher;
+      tarballFetcher = cfgArgs.tarballFetcher or defaults.tarballFetcher;
+      gitFetcher     = cfgArgs.gitFetcher     or defaults.gitFetcher;
+      linkFetcher    = cfgArgs.linkFetcher    or defaults.linkFetcher;
+      dirFetcher     = cfgArgs.dirFetcher     or defaults.dirFetcher;
     };
-    doFetch = self: key: entry: let
+    fetcherInfo = config: key: entry: let
       type = typeOfEntry entry;
-      fetchArgs = pke2fetchArgs self.cwd key entry;
-      fetchFn =
-      if type == "symlink"          then self.linkFetcher else
-      if type == "path"             then self.dirFetcher  else
-      if type == "git"              then self.gitFetcher  else
-      if type == "registry-tarball" then self.urlFetcher  else
-      if type == "source-tarball"   then self.urlFetcher  else
-      throw "(fetcher:doFetch) Unrecognized entry type for: ${entry}";
-    in fetchFn fetchArgs;
-  in config // { __functor = self: doFetch self; };
+    in {
+      inherit type;
+      fetchFn   = fetcherForType config type;
+      fetchArgs = plock2EntryFetchArgs config.cwd key entry;
+    };
+  in config // {
+    __functor = self: key: entry: let
+      fi = fetcherInfo self key entry;
+      fetched = fi.fetchFn fi.fetchArgs;
+    in fetched // ( lib.optionalAttrs ( ! simple ) { fetchInfo = fi; } );
+  };
 
 
 /* -------------------------------------------------------------------------- */
@@ -313,16 +346,14 @@ let
 in {
   inherit
     typeOfEntry
-    # NOTE: These are really just exposed for niche scenarios, I know the names
-    #       are esoteric.
-    #       We really want users to call `fetcher' instead of messing with these
-    #       "internal" implementations.
-    per2fetchArgs
-    peg2fetchArgs
-    pel2fetchArgs
-    pkp2fetchArgs
-    pke2fetchArgs    # This is the router.
+    fetcherForType
+    plock2TbFetchArgs
+    plock2GitFetchArgs
+    plock2LinkFetchArgs
+    plock2PathFetchArgs
+    plock2EntryFetchArgs    # This is the router.
     defaultFetchers
+    getPreferredFetchers
     fetcher
   ;
 }

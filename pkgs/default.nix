@@ -93,10 +93,10 @@
     inherit (pkgs) stdenv jq xcbuild linkFarm;
     inherit (_fetcher) typeOfEntry;
     inherit (_mkNodeTarball) packNodeTarballAsIs;
-    fetchurl = lib.fetchurlDrv;  # For tarballs without unpacking
-    doFetch = _fetcher.fetcher {
+    fetcher = _fetcher.fetcher {
       cwd = throw "Override `cwd' to use local fetchers";  # defer to call-site
-      preferBuiltins = true;
+      preferBuiltins  = true;
+      preferFetchTree = true;
     };
   };
 
@@ -143,12 +143,14 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
   ;
   inherit (_fetcher)
     typeOfEntry
-    per2fetchArgs
-    peg2fetchArgs
-    pel2fetchArgs
-    pkp2fetchArgs
-    pke2fetchArgs    # This is the router.
+    fetcherForType
+    plock2TbFetchArgs
+    plock2GitFetchArgs
+    plock2LinkFetchArgs
+    plock2PathFetchArgs
+    plock2EntryFetchArgs    # This is the router.
     defaultFetchers
+    getPreferredFetchers
     fetcher
   ;
   inherit (_plock2nm)
@@ -159,6 +161,7 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
   inherit (_node-pkg-set)
     makeMetaSet
     makeOuterScope
+    makeNodePkgSet'
     makeNodePkgSet
 
     pkgEntFromPjs
