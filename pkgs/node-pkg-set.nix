@@ -670,7 +670,14 @@
                     __pscope.__pscope.__pscope.untarSanPerms
   , __pscope
   , ...
-  } @ attrs: untarSanPerms { inherit tarball name; };
+  } @ attrs: let
+    addBinPerms = lib.optionalAttrs ( meta.hasBin or false ) {
+      postTar = let
+        targets = if meta.bin ? __DIR__ then "$out/${meta.bin.__DIR__}/*" else
+          builtins.concatStringsSep " " ( map ( p: "$out/${p}" ) ( builtins.attrValues meta.bin ) );
+      in "chmod +x ${targets}";
+    };
+  in untarSanPerms ( { inherit tarball name; } // addBinPerms );
 
   extendEntUseSafeUnpack = ent: ent.__extend ( final: prev: let
     isTb = ( prev.meta.entrySubtype == "registry-tarball" ) ||
