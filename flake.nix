@@ -100,6 +100,10 @@
           cwd = throw "Override `cwd' to use local fetchers";  # defer to call-site
           preferBuiltins  = true;
           preferFetchTree = true;
+          inherit (final._fetcher.defaultFetchers.defaultBuiltins)
+            dirFetcher
+            linkFetcher
+          ;
         };
       };
       inherit (final._node-pkg-set)
@@ -277,6 +281,10 @@
           cwd = throw "Override `cwd' to use local fetchers";  # defer to call-site
           preferBuiltins  = true;
           preferFetchTree = true;
+          inherit (_fetcher.defaultFetchers.defaultBuiltins)
+            dirFetcher
+            linkFetcher
+          ;
         };
       };
 

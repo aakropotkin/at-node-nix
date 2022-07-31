@@ -222,12 +222,19 @@ let
   , key # relative path
   }: let
     cwd' = assert lib.libpath.isAbspath cwd; head ( match "(.*[^/])/?" cwd );
-    abs = if ( lib.libpath.isAbspath key ) then key else "${cwd'}/${key}";
+    abs = if ( lib.libpath.isAbspath key ) then key else
+          if ( key == "" ) then cwd' else "${cwd'}/${key}";
   in {
-    builtins.path      = { path = abs; };
     builtins.fetchTree = { type = "path"; path = abs; };
+    builtins.path = {
+      path = abs;
+      filter = name: type: let
+        bname = baseNameOf name;
+        ignores = ["dist" "node_modules" "package-lock.json" "yarn.lock"];
+      in ! ( builtins.elem bname ignores );
+    };
     # FIXME: I have no idea if this works.
-    flake              = { type = "path"; path = abs; flake = false; };
+    flake = { type = "path"; path = abs; flake = false; };
   };
 
 
@@ -337,7 +344,12 @@ let
     __functor = self: key: entry: let
       fi = fetcherInfo self key entry;
       fetched = fi.fetchFn fi.fetchArgs;
-    in fetched // ( lib.optionalAttrs ( ! simple ) { fetchInfo = fi; } );
+      fmeta = ( lib.optionalAttrs ( ! simple ) { fetchInfo = fi; } );
+      fattrs = if builtins.isString fetched then { outPath = fetched; } else
+        if builtins.isAttrs fetched then fetched else
+        throw ( "(fetcher) Unexpected return type '${builtins.typeOf fetched}'"
+                + " from fetch function" );
+    in fattrs;
   };
 
 

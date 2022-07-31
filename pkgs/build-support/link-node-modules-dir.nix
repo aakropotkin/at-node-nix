@@ -31,7 +31,8 @@ let
            ( m.path or m.outPath or ( toString m ) );
     to = let
       fromString = if fixup then fixPath m else "$out";
-    in if builtins.isString m then fromString else "$out/${m.name or "."}";
+      fromAttrs  = "$out/" + ( m.to or m.ident or m.name or "." );
+    in if builtins.isString m then fromString else fromAttrs;
   in ( if fixup then "mkdir -p \"${to}\"\n" else "" ) + ''
     ${lndir}/bin/lndir -silent -ignorelinks ${from} "${to}"
   '';

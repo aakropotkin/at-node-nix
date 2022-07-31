@@ -54,7 +54,7 @@
   # If a script is not found, is will be skipped unless `skipMissing' is false.
   , skipMissing     ? true
   # Skip linking the `node_modules' directory.
-  , dontLinkModules ? false
+  , dontLinkModules ? nodeModules == null
   , ...
   } @ attrs: let
     mkDrvArgs = removeAttrs attrs [
@@ -72,15 +72,16 @@
     nativeBuildInputs = ( attrs.nativeBuildInputs or [] ) ++ [jq] ++
                         ( lib.optional ( nodejs != null ) nodejs );
     # FIXME: handle bundled deps properly
-    postUnpack = lib.optionalString ( ! dontLinkModules ) ''
+    postUnpack = ''
       export absSourceRoot="$PWD/$sourceRoot"
       if ! test -d "$absSourceRoot"; then
         echo "absSourceRoot: $absSourceRoot does not exist" >&2
         exit 1;
       fi
+    '' + ( lib.optionalString ( ! dontLinkModules ) ''
       ln -s -- ${nodeModules} "$absSourceRoot/node_modules"
       export PATH="$PATH:$absSourceRoot/node_modules/.bin"
-    '';
+    '' );
     buildPhase = let
       runOne = sn: let
         fallback = lib.optionalString skipMissing "// \":\"";

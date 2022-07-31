@@ -87,15 +87,16 @@
       jq
     ] ++ ( lib.optional stdenv.isDarwin xcbuild );
     # FIXME: handle bundled deps properly
-    postUnpack = lib.optionalString ( ! dontLinkModules ) ''
+    postUnpack = ''
       export absSourceRoot="$PWD/$sourceRoot"
       if ! test -d "$absSourceRoot"; then
         echo "absSourceRoot: $absSourceRoot does not exist" >&2
         exit 1;
       fi
+    '' + ( lib.optionalString ( ! dontLinkModules ) ''
       ln -s -- ${nodeModules} "$absSourceRoot/node_modules"
       export PATH="$PATH:$absSourceRoot/node_modules/.bin"
-    '';
+    '' );
     configurePhase = let
       runPreInst =
         lib.optionalString ( ! ignorePrePostScripts ) ( runOne "preinstall" );

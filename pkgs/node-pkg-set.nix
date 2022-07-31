@@ -120,7 +120,9 @@
 
   makeNodePkgSet' = { pkgSetOverlays ? pkgSetDrvsOverlay }: members: let
     extra = {
-      __entries = self: removeAttrs self ( extInfoExtras ++ ["__pscope"] );
+      __entries = self: removeAttrs self ( extInfoExtras ++ [
+        "__pscope" "__meta"
+      ] );
       __new = self: lib.libmeta.mkExtInfo' extra;
     };
     membersR = let
@@ -448,7 +450,7 @@
     inherit (meta) ident key;
     source = let
       fetcherFor = __pscope.__pscope.fetcher // { cwd = lockDir; };
-    in fetcherFor self.meta.entries.pl2.pkey self.meta.entries.pl2;
+    in fetcherFor pkey meta.entries.pl2;
   } // tb' );
 
 
@@ -470,7 +472,10 @@
                                 ( v // { inherit __pscope; } );
     pl2entsR = let
       ents = pl2metas.__entries;
-    in self: builtins.mapAttrs ( mkPkgEnt self ) ents;
+    in self: ( ( builtins.mapAttrs ( mkPkgEnt self ) ents ) // {
+      __meta.__serial = false;
+      __meta.metaSet  = pl2metas;
+    } );
     nodePkgs = let
       mnps = if ! ( args ? pkgSetOverlays ) then makeNodePkgSet else
              makeNodePkgSet' { inherit (args) pkgSetOverlays; };
@@ -493,30 +498,71 @@
 
   extendPkgSetAddTarballs = final: prev:
     builtins.mapAttrs ( _: extendEntAddTarball )
-                      ( removeAttrs prev ["__pscope"] );
+                      ( removeAttrs prev ["__pscope" "__meta"] );
+
+
+/* -------------------------------------------------------------------------- */
+
+  #treeKeyed = let
+  #  keyFor = pkey: v: let
+  #    ident = v.name or ( lib.yank ".*node_modules/(.*)" pkey );
+  #  in "${ident}/${v.version}";
+  #in builtins.mapAttrs keyFor ( removeAttrs mset.__meta.plock.packages [""] );
+
+  idealTreeForRoot = mset: let
+    inherit (mset.__meta) plock;
+    asLinkModulesEnt = pset: key: v: {
+      path = pset.${key}.prepared.outPath;
+      to   = v.entries.pl2.pkey;
+    };
+    subs = removeAttrs ( mset.__entries ) ["${plock.name}/${plock.version}"];
+    modules = pset: let
+      lment = asLinkModulesEnt pset;
+    in builtins.attrValues ( builtins.mapAttrs lment subs );
+  in modules;
+
 
 
 /* -------------------------------------------------------------------------- */
 
   # XXX: This must be composed with the group of overlays which adds `prepared'.
+  #extendPkgSetWithNodeModulesDirs = final: prev: let
+  #  setModulesFor = _: value: value.__extend ( eFinal: ePrev: let
+  #    allDevKeys =
+  #      lib.unique ( ePrev.meta.runtimeDepKeys ++ ePrev.meta.devDepKeys );
+  #    k2MD = keys: prev.__pscope.linkModules {
+  #      modules = map ( k: final.${k}.module.outPath ) keys;
+  #    };
+  #  in {
+  #    nodeModulesDir = k2MD ePrev.meta.runtimeDepKeys;
+  #  } // ( lib.optionalAttrs ( ePrev.meta ? devDepKeys ) {
+  #    nodeModulesDir-dev = k2MD allDevKeys;
+  #  } ) );
+  #  # Global Modules also need it but I have to unfuck the cycle chasing first.
+  #  needsNm = k: { meta, ... } @ ent:
+  #    ( meta.hasBuild   or true )        ||
+  #    ( meta.hasInstallScript or false ) ||
+  #    ( meta.hasPrepare or false );
+  #  packages = lib.filterAttrs needsNm ( removeAttrs prev ["__pscope"] );
+  #in builtins.mapAttrs setModulesFor packages;
+
   extendPkgSetWithNodeModulesDirs = final: prev: let
-    setModulesFor = _: value: value.__extend ( eFinal: ePrev: let
-      allDevKeys =
-        lib.unique ( ePrev.meta.runtimeDepKeys ++ ePrev.meta.devDepKeys );
-      k2MD = keys: prev.__pscope.linkModules {
-        modules = map ( k: final.${k}.module.outPath ) keys;
-      };
-    in {
-      nodeModulesDir = k2MD ePrev.meta.runtimeDepKeys;
-    } // ( lib.optionalAttrs ( ePrev.meta ? devDepKeys ) {
-      nodeModulesDir-dev = k2MD allDevKeys;
-    } ) );
-    # Global Modules also need it but I have to unfuck the cycle chasing first.
-    needsNm = k: { meta, ... } @ ent:
-      ( meta.hasBuild   or true )        ||
-      ( meta.hasInstallScript or false ) ||
-      ( meta.hasPrepare or false );
-    packages = lib.filterAttrs needsNm ( removeAttrs prev ["__pscope"] );
+    needsNm = k: { meta, ... } @ ent: meta ? runtimeClosureKeys;
+    nmFor = k: { meta, ... } @ ent:
+      if meta.runtimeClosureKeys == [] then null else
+        ( idealTreeForRoot prev.__meta.metaSet ) prev;
+    setModulesFor = key: ent: ent.__extend ( _: pPrev:
+      # FIXME: this is just for testing a trivial tree
+      if ent.meta.entries.pl2.pkey != "" then {
+        nodeModulesDir     = null;
+        nodeModulesDir-dev = null;
+      } else ( let nmd = nmFor key pPrev; in {
+        nodeModulesDir     = nmd;
+        nodeModulesDir-dev = nmd;
+                   } ) );
+    packages = lib.filterAttrs needsNm ( removeAttrs prev [
+      "__pscope" "__meta"
+    ] );
   in builtins.mapAttrs setModulesFor packages;
 
 
@@ -563,7 +609,9 @@
   extendPkgSetWithBuilds = final: prev: let
     # XXX: This might need to be more discerning.
     shouldBuild = key: value: ( value.meta.hasBuild or true );
-    packages = lib.filterAttrs shouldBuild ( removeAttrs prev ["__pscope"] );
+    packages = lib.filterAttrs shouldBuild ( removeAttrs prev [
+      "__pscope" "__meta"
+    ] );
   in builtins.mapAttrs ( _: extendEntWithBuilt ) packages;
 
 
@@ -608,7 +656,9 @@
 
   extendPkgSetWithInstalls = final: prev: let
     shouldInstall = key: value: ( value.meta.hasInstallScript or false );
-    packages = lib.filterAttrs shouldInstall ( removeAttrs prev ["__pscope"] );
+    packages = lib.filterAttrs shouldInstall ( removeAttrs prev [
+      "__pscope" "__meta"
+    ] );
   in builtins.mapAttrs ( _: extendEntWithInstalled ) packages;
 
 
@@ -662,7 +712,7 @@
 
   extendPkgSetWithPrepares = final: prev:
     builtins.mapAttrs ( _: extendEntWithPrepared )
-                      ( removeAttrs prev ["__pscope"] );
+                      ( removeAttrs prev ["__pscope" "__meta"] );
 
 
 /* -------------------------------------------------------------------------- */
@@ -699,7 +749,7 @@
 
   extendPkgSetWithModules = final: prev:
     builtins.mapAttrs ( _: extendEntWithModule )
-                      ( removeAttrs prev ["__pscope"] );
+                      ( removeAttrs prev ["__pscope" "__meta"] );
 
 
 /* -------------------------------------------------------------------------- */
@@ -749,7 +799,7 @@
 
   extendPkgSetWithSafeUnpackList = keys: final: prev: let
     packages = lib.filterAttrs ( k: _: builtins.elem k keys )
-                               ( removeAttrs prev ["__pscope"] );
+                               ( removeAttrs prev ["__pscope" "__meta"] );
   in builtins.mapAttrs ( _: extendEntUseSafeUnpack ) packages;
 
 
