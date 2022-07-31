@@ -362,7 +362,8 @@
                 forceRtDeps forceDevDeps topo;
       };
     in makeMetaSet ( entsDD // { inherit __meta; } );
-  in metaSet.__extend ( lib.composeManyExtensions metaSetOverlays );
+    msEx = metaSet.__extend ( lib.composeManyExtensions metaSetOverlays );
+  in addMetaEntriesRuntimeKeys msEx;
 
 
 /* -------------------------------------------------------------------------- */
