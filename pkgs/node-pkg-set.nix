@@ -574,20 +574,26 @@
   , nodejs      ? __pscope.__pscope.nodejs or __pscope.__pscope.__pscope.nodejs
   , jq          ? __pscope.__pscope.jq or __pscope.__pscope.__pscope.jq
   , __pscope
+  , hasPrepare  ? meta.hasPrepare or false
+  , hasBin      ? meta.hasBin or false
+  , binPermsSet ? meta.binPermsSet or false
   , ...
   } @ attrs: let
-    hasPrepare = meta.hasPrepare or false;
     prepared = evalScripts ( {
       inherit src name ident version meta nodejs jq stdenv;
       nodeModules = nodeModulesDir;
       runScripts = ["preprepare" "prepare" "postprepare"];
-    } // ( removeAttrs attrs [
+    } // ( lib.optionalAttrs ( hasBin && ( ! binPermsSet ) ) {
+      postInstall = genSetBinPermissionsHook { inherit meta; };
+    } ) // ( removeAttrs attrs [
       "simple" "__pscope" "installed" "built" "source" "nodeModulesDir"
-      "evalScripts"
+      "evalScripts" "hasPrepare" "hasBin" "binPermsSet"
     ] ) );
     passthru = { inherit src prepared; } // ( prepared.passthru or {} );
-    preparedByScript = prepared //
-     ( if simple then { inherit passthru; } else { inherit meta passthru; } );
+    preparedByScript =
+      prepared // { inherit passthru; } // ( lib.optionalAttrs ( ! simple ) {
+        meta = meta // ( lib.optionalAttrs hasBin { binPermsSet = true; } );
+      } );
   in if hasPrepare then preparedByScript else src;
 
   extendEntWithPrepared = ent: ent.__extend ( final: prev: {
@@ -672,10 +678,8 @@
   , ...
   } @ attrs: let
     addBinPerms = lib.optionalAttrs ( meta.hasBin or false ) {
-      postTar = let
-        targets = if meta.bin ? __DIR__ then "$out/${meta.bin.__DIR__}/*" else
-          builtins.concatStringsSep " " ( map ( p: "$out/${p}" ) ( builtins.attrValues meta.bin ) );
-      in "chmod +x ${targets}";
+      postTar = genSetBinPermissionsHook { inherit meta; };
+      extraAttrs.meta.binPermsSet = true;
     };
   in untarSanPerms ( { inherit tarball name; } // addBinPerms );
 
@@ -691,6 +695,18 @@
     packages = lib.filterAttrs ( k: _: builtins.elem k keys )
                                ( removeAttrs prev ["__pscope"] );
   in builtins.mapAttrs ( _: extendEntUseSafeUnpack ) packages;
+
+
+/* -------------------------------------------------------------------------- */
+
+  genSetBinPermissionsHook = { meta, relDir ? "$out", ... }: let
+    from = let m = builtins.match "(.*)/" relDir; in
+            if m == null then relDir else m;
+    binPaths = map ( p: "${from}/${p}" ) ( builtins.attrValues meta.bin );
+    targets =
+      if meta.bin ? __DIR__ then "${from}/${meta.bin.__DIR__}/*" else
+      builtins.concatStringsSep " " binPaths;
+  in "chmod +x ${targets}";
 
 
 /* -------------------------------------------------------------------------- */
@@ -723,6 +739,8 @@ in {
     metaEntriesFromPlockV2
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
+
+    genSetBinPermissionsHook
 
     extendPkgSetWithNodeModulesDirs
 
