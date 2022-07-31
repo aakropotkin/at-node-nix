@@ -172,6 +172,8 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
 
+    formRuntimeClosuresFromTopo
+    addMetaEntriesRuntimeKeys
     extendPkgSetWithNodeModulesDirs
 
     extendEntWithTarball
@@ -197,6 +199,9 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
     unpackSafe
     extendEntUseSafeUnpack
     extendPkgSetWithSafeUnpackList
+
+    metaEntIsSimple
+    metaSetPartitionSimple
   ;
 
 } )

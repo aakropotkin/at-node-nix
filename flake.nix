@@ -116,6 +116,8 @@
         pkgEntFromPlockV2
         pkgEntriesFromPlockV2
 
+        formRuntimeClosuresFromTopo
+        addMetaEntriesRuntimeKeys
         extendPkgSetWithNodeModulesDirs
 
         extendEntWithTarball
@@ -141,6 +143,9 @@
         unpackSafe
         extendEntUseSafeUnpack
         extendPkgSetWithSafeUnpackList
+
+        metaEntIsSimple
+        metaSetPartitionSimple
       ;
 
       genericInstall = import ./pkgs/build-support/genericInstall.nix {
@@ -322,6 +327,8 @@
         pkgEntFromPlockV2
         pkgEntriesFromPlockV2
 
+        formRuntimeClosuresFromTopo
+        addMetaEntriesRuntimeKeys
         extendPkgSetWithNodeModulesDirs
 
         extendEntWithTarball
@@ -347,6 +354,9 @@
         unpackSafe
         extendEntUseSafeUnpack
         extendPkgSetWithSafeUnpackList
+
+        metaEntIsSimple
+        metaSetPartitionSimple
       ;
 
       inherit (_mkNodeTarball)

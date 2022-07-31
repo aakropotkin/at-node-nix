@@ -365,6 +365,62 @@
 
 /* -------------------------------------------------------------------------- */
 
+  # Determines if a package needs any `nodeModulesDir[-dev]' fields.
+  # If `hasBuild' is not yet set, we will err on the safe side and assume it
+  # has a build.
+  # XXX: It is strongly recommended that you provide a `hasBuild' field.
+  metaEntIsSimple = {
+    hasBuild         ? true
+  , hasInstallScript ? false
+  , hasPrepare       ? false
+  , hasBin           ? false
+  , ...
+  } @ attrs: ! ( hasBuild || hasInstallScript || hasPrepare || hasBin );
+
+  metaSetPartitionSimple = mset: let
+    lst = builtins.attrValues mset.__entries;
+    parted = builtins.partition metaEntIsSimple lst;
+  in {
+    simple       = parted.right;
+    needsModules = parted.wrong;
+  };
+
+
+/* -------------------------------------------------------------------------- */
+
+  # FIXME: use topo cycle info to handle cyclical deps.
+  formRuntimeClosuresFromTopo = mset: let
+    consume = cset: key: let
+      runtimeDepKeys = let
+        pins = mset.${key}.runtimeDepPins or {};
+      in builtins.attrValues ( builtins.mapAttrs ( k: v: "${k}/${v}" ) pins );
+      indirects = builtins.concatMap ( key: cset.${key}.runtimeClosureKeys )
+                                     runtimeDepKeys;
+      flat = lib.unique ( runtimeDepKeys ++ indirects );
+      runtimeClosureKeys = builtins.filter ( dk: dk != key ) flat;
+    in cset // { ${key} = { inherit runtimeClosureKeys; }; };
+  in builtins.foldl' consume {} mset.__meta.topo.result;
+
+  addMetaEntriesRuntimeKeys = mset: let
+    closures = formRuntimeClosuresFromTopo mset;
+    addEnt = key: ent: ent // {
+      runtimeClosureKeys =
+        ent.runtimeClosureKeys or closures.${key}.runtimeClosureKeys;
+    };
+    extendEnt = key: ent: ent.__extend ( _: mPrev: {
+      runtimeClosureKeys =
+        mPrev.runtimeClosureKeys or closures.${key}.runtimeClosureKeys;
+    } );
+    processEnt = key: ent: let
+      procFn = if ent ? __extend then extendEnt else addEnt;
+    in procFn key ent;
+    extendSet = final: prev:
+      builtins.mapAttrs processEnt mset.__entries;
+  in mset.__extend extendSet;
+
+
+/* -------------------------------------------------------------------------- */
+
   # v2 package locks normalize most fields, so for example, `bin' will always
   # be an attrset of name -> path, even if the original `project.json' wrote
   # `"bin": "./foo"' or `"direcories": { "bin": "./scripts" }'.
@@ -742,6 +798,8 @@ in {
 
     genSetBinPermissionsHook
 
+    formRuntimeClosuresFromTopo
+    addMetaEntriesRuntimeKeys
     extendPkgSetWithNodeModulesDirs
 
     extendEntWithTarball
@@ -767,6 +825,9 @@ in {
     unpackSafe
     extendEntUseSafeUnpack
     extendPkgSetWithSafeUnpackList
+
+    metaEntIsSimple
+    metaSetPartitionSimple
   ;
 }
 
