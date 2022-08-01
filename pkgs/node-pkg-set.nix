@@ -355,7 +355,17 @@
     metaSet = let
       entsDD = let
         nv = { key, ... } @ value: { inherit value; name = key; };
-      in builtins.listToAttrs ( map nv withPinsList );
+        asNvList = map nv withPinsList;
+        merge = acc: { name, value }: let
+          inherit (value.entries.pl2) pkey;
+          instances = ( acc.${name}.instances or {} ) // {
+            ${pkey} = {
+              inherit (value) runtimeDepPins;
+              inherit (value.entries) pl2;
+            };
+          };
+        in acc // { ${name} = value // { inherit instances; }; };
+      in builtins.foldl' merge {} asNvList;
       __meta = {
         setFromType = "package-lock.json(v2)";
         inherit plock lockDir lockPath metaSetOverlays metaEntOverlays
@@ -510,16 +520,22 @@
   #  in "${ident}/${v.version}";
   #in builtins.mapAttrs keyFor ( removeAttrs mset.__meta.plock.packages [""] );
 
+  # FIXME: this doesn't filter `dev' out.
   idealTreeForRoot = mset: let
     inherit (mset.__meta) plock;
-    asLinkModulesEnt = pset: key: v: {
-      path = pset.${key}.prepared.outPath;
-      to   = v.entries.pl2.pkey;
-    };
+    asLinkModulesEnt = pset: key: v: let
+      forInstance = pkey: let
+        isTop = pkey == "node_modules/${v.ident}";
+      in {
+        path = if isTop then pset.${key}.module else pset.${key}.prepared;
+        to = if isTop then "" else lib.libpath.stripComponents 1 pkey;
+      };
+    in map forInstance ( builtins.attrNames v.instances );
     subs = removeAttrs ( mset.__entries ) ["${plock.name}/${plock.version}"];
     modules = pset: let
       lment = asLinkModulesEnt pset;
-    in builtins.attrValues ( builtins.mapAttrs lment subs );
+      lms   = builtins.attrValues ( builtins.mapAttrs lment subs );
+    in builtins.concatLists lms;
   in modules;
 
 
@@ -549,9 +565,10 @@
 
   extendPkgSetWithNodeModulesDirs = final: prev: let
     needsNm = k: { meta, ... } @ ent: meta ? runtimeClosureKeys;
-    nmFor = k: { meta, ... } @ ent:
-      if meta.runtimeClosureKeys == [] then null else
-        ( idealTreeForRoot prev.__meta.metaSet ) prev;
+    nmFor = k: { meta, ... } @ ent: let
+      ideal = ( idealTreeForRoot prev.__meta.metaSet ) prev;
+    in if meta.runtimeClosureKeys == [] then null else
+       prev.__pscope.linkModules { modules = ideal; };
     setModulesFor = key: ent: ent.__extend ( _: pPrev:
       # FIXME: this is just for testing a trivial tree
       if ent.meta.entries.pl2.pkey != "" then {
@@ -577,7 +594,7 @@
   , meta    ? src.meta or lib.libmeta.metaCore { inherit ident version; }
   , simple  ? false  # Prevents processing of `meta' - just pack. Name required.
   , source  ? throw "You gotta give me something to work with here"
-  , nodeModulesDir-dev
+  , nodeModulesDir-dev ? null
   , runBuild  ? __pscope.__pscope.runBuild or
                 __pscope.__pscope.__pscope.runBuild
   , nodejs    ? __pscope.__pscope.nodejs or __pscope.__pscope.__pscope.nodejs
@@ -627,7 +644,7 @@
   , simple  ? false  # Prevents processing of `meta' - just pack. Name required.
   , source  ? throw "You gotta give me something to work with here"
   , built   ? source
-  , nodeModulesDir
+  , nodeModulesDir ? null
   , genericInstall ? __pscope.__pscope.genericInstall or
                      __pscope.__pscope.__pscope.genericInstall
   , nodejs  ? __pscope.__pscope.nodejs or __pscope.__pscope.__pscope.nodejs
@@ -724,21 +741,32 @@
   , name     ? meta.names.module
   , ident    ? meta.ident
   , meta
-  , linkFarm ? __pscope.__pscope.linkFarm or __pscope.__pscope.__pscope.linkFarm
+  , linkModules ? __pscope.__pscope.linkModules or
+                  __pscope.__pscope.__pscope.linkModules
   , __pscope
   , ...
   } @ attrs: let
     binEnts = let
-      mkBins = bname: p: { name = ".bin/${bname}"; path = "../${ident}/${p}"; };
+      mkBins = bname: p: {
+        path = "${prepared}/${p}";
+        to   = ".bin/${bname}";
+      };
+      fromFiles = lib.mapAttrsToList mkBins meta.bin;
       fromBindir = [{
-        name = ".bin";
-        path = "../${ident}/${meta.bin.__DIR__}";
+        path = "${prepared}/${meta.bin.__DIR__}";
+        to   = ".bin";
       }];
     in if ( ! ( meta.hasBin or false ) ) then [] else
-       if meta.bin ? __DIR__ then fromBindir else
-       ( lib.mapAttrsToList mkBins meta.bin );
-    nmdir = [{ name = ident; path = prepared.outPath; }];
-  in __pscope.__pscope.__pscope.linkFarm name ( nmdir ++ binEnts );
+       if meta.bin ? __DIR__ then fromBindir else fromFiles;
+    nmdir = [{ path = prepared.outPath; to = ident; }];
+    # XXX: This naming is likely unclear to readers.
+    # Just for clarity: I am using `linkModules' just because I want to invoke
+    # `lndir' and it already has a convenient functionality for this.
+    # I should rename this later.
+    module = linkModules {
+      modules = nmdir ++ binEnts;
+    };
+  in module.overrideAttrs ( _: { inherit name; } );
 
   extendEntWithModule = ent: ent.__extend ( final: prev: {
     module = final.__apply modularizeEnt {};

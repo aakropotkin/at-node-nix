@@ -31,11 +31,22 @@ let
            ( m.path or m.outPath or ( toString m ) );
     to = let
       fromString = if fixup then fixPath m else "$out";
-      fromAttrs  = "$out/" + ( m.to or m.ident or m.name or "." );
+      fromAttrs  = let
+        subdir = m.to or m.ident or null;
+      in if ( ! ( builtins.elem subdir [null "." ""] ) ) then "$out/${subdir}"
+        else "$out";
     in if builtins.isString m then fromString else fromAttrs;
-  in ( if fixup then "mkdir -p \"${to}\"\n" else "" ) + ''
-    ${lndir}/bin/lndir -silent -ignorelinks ${from} "${to}"
-  '';
+    mkdirCmd = if to != "$out" then "mkdir -p \"${to}\"\n" else "";
+    lndirCmd = ''
+      if test -d ${from}; then
+        ${mkdirCmd}
+        ${lndir}/bin/lndir -silent -ignorelinks ${from} "${to}/"
+      else
+        mkdir -p "$( dirname ${to}; )"
+        ln -s ${from} "${to}"
+      fi
+    '';
+  in lndirCmd;
 
   # If the root of a derivation has `package.json', that tells us the caller
   # didn't run a routine to move an unpacked tarball to a subdir.
@@ -50,7 +61,6 @@ let
   linkModules = { modules ? [], fixup ? false }: runCommandNoCC "node_modules" {
       preferLocalBuild = true;
       allowSubstitutes = false;
-      inherit modules;
   } ( "mkdir -p $out\n" + ( strConcatMap ( link1 fixup ) modules ) );
 
 in linkModules
