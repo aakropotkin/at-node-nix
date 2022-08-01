@@ -337,9 +337,10 @@
       builtins.attrValues ( builtins.mapAttrs addDirectDepKeys ents );
     topo = let
       bDependsOnA = a: b: let
-        bDeps = b.runtimeDepPins // ( b.devDepPins or {} );
+        #bDeps = b.runtimeDepPins // ( b.devDepPins or {} );
+        bDeps = b.runtimeDepPins;
       in ( b ? runtimeDepPins ) && ( bDeps ? ${a.ident} ) &&
-         ( bDeps.${a.ident} == a.version );
+         ( bDeps.${a.ident} == a.version ) && ( a.key != b.key );
       sorted = let
         full = lib.toposort bDependsOnA withPinsList;
         fullKeyed = builtins.mapAttrs ( _: map ( x: x.key ) ) full;
@@ -429,7 +430,7 @@
     in procFn key ent;
     extendSet = final: prev:
       builtins.mapAttrs processEnt mset.__entries;
-  in mset.__extend extendSet;
+  in if mset.__meta.topo ? result then mset.__extend extendSet else mset;
 
 
 /* -------------------------------------------------------------------------- */
@@ -564,10 +565,12 @@
   #in builtins.mapAttrs setModulesFor packages;
 
   extendPkgSetWithNodeModulesDirs = final: prev: let
-    needsNm = k: { meta, ... } @ ent: meta ? runtimeClosureKeys;
+    needsNm = k: { meta, ... } @ ent:
+      meta ? runtimeClosureKeys || ( meta.entries.pl2.pkey == "" );
     nmFor = k: { meta, ... } @ ent: let
+      isRoot = meta.entries.pl2.pkey == "";
       ideal = ( idealTreeForRoot prev.__meta.metaSet ) prev;
-    in if meta.runtimeClosureKeys == [] then null else
+    in if ( ! isRoot ) && ( meta.runtimeClosureKeys == [] ) then null else
        prev.__pscope.linkModules { modules = ideal; };
     setModulesFor = key: ent: ent.__extend ( _: pPrev:
       # FIXME: this is just for testing a trivial tree

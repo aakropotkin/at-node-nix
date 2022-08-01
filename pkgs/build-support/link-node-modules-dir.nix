@@ -38,12 +38,12 @@ let
     in if builtins.isString m then fromString else fromAttrs;
     mkdirCmd = if to != "$out" then "mkdir -p \"${to}\"\n" else "";
     lndirCmd = ''
-      if test -d ${from}; then
+      if test -d "${from}"; then
         ${mkdirCmd}
-        ${lndir}/bin/lndir -silent -ignorelinks ${from} "${to}/"
+        ${lndir}/bin/lndir -silent -ignorelinks "${from}" "${to}"
       else
-        mkdir -p "$( dirname ${to}; )"
-        ln -s ${from} "${to}"
+        mkdir -p "$( dirname "${to}"; )"
+        ln -s "${from}" "${to}"
       fi
     '';
   in lndirCmd;

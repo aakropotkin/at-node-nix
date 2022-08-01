@@ -226,13 +226,7 @@ let
           if ( key == "" ) then cwd' else "${cwd'}/${key}";
   in {
     builtins.fetchTree = { type = "path"; path = abs; };
-    builtins.path = {
-      path = abs;
-      filter = name: type: let
-        bname = baseNameOf name;
-        ignores = ["dist" "node_modules" "package-lock.json" "yarn.lock"];
-      in ! ( builtins.elem bname ignores );
-    };
+    builtins.path = { path = abs; };
     # FIXME: I have no idea if this works.
     flake = { type = "path"; path = abs; flake = false; };
   };
