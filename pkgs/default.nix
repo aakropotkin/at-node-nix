@@ -163,6 +163,8 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
     makeOuterScope
     makeNodePkgSet'
     makeNodePkgSet
+    makeNodeModulesScope'
+    makeNodeModulesScope
 
     pkgEntFromPjs
     pkgEntriesFromPjs
@@ -171,6 +173,10 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
     metaEntFromPlockV2
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
+
+    addNormalizedDepsToMeta
+    addNormalizedDepsToEnt
+    genSetBinPermissionsHook
 
     formRuntimeClosuresFromTopo
     addMetaEntriesRuntimeKeys

@@ -111,6 +111,8 @@
         makeOuterScope
         makeNodePkgSet'
         makeNodePkgSet
+        makeNodeModulesScope'
+        makeNodeModulesScope
 
         pkgEntFromPjs
         pkgEntriesFromPjs
@@ -119,6 +121,10 @@
         metaEntFromPlockV2
         pkgEntFromPlockV2
         pkgEntriesFromPlockV2
+
+        addNormalizedDepsToMeta
+        addNormalizedDepsToEnt
+        genSetBinPermissionsHook
 
         formRuntimeClosuresFromTopo
         addMetaEntriesRuntimeKeys
@@ -326,6 +332,8 @@
         makeOuterScope
         makeNodePkgSet'
         makeNodePkgSet
+        makeNodeModulesScope'
+        makeNodeModulesScope
 
         pkgEntFromPjs
         pkgEntriesFromPjs
@@ -334,6 +342,10 @@
         metaEntFromPlockV2
         pkgEntFromPlockV2
         pkgEntriesFromPlockV2
+
+        addNormalizedDepsToMeta
+        addNormalizedDepsToEnt
+        genSetBinPermissionsHook
 
         formRuntimeClosuresFromTopo
         addMetaEntriesRuntimeKeys

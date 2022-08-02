@@ -289,10 +289,13 @@
       };
     in { inherit type; } // hash' // url' // path';
 
+    depInfo =
+      ( lib.libpkginfo.normalizedDepsAll pl2ent ) // { __serial = false; };
+
     meta = let
       core = metaCore { inherit ident version; };
     in core.__update ( {
-      inherit hasInstallScript hasBin sourceInfo;
+      inherit hasInstallScript hasBin sourceInfo depInfo;
       entryFromType = "package-lock.json(v2)";
       entrySubtype = entType;
       entries = {
@@ -327,19 +330,21 @@
       pinnedAttrs = pinned.${meta.key};
       wasEmpty =
         ! ( ( pinnedAttrs ? runtimeDepPins ) || ( pinnedAttrs ? devDepPins ) );
-      wantsDev = ( pinnedAttrs ? devDepKeys ) &&
+      wantsDev = ( pinnedAttrs ? devDepPins ) &&
                  ( ( builtins.elem meta.key forceDevDeps ) ||
                    ( ( meta.sourceInfo.type != "tarball" ) && meta.hasBuild ) );
       keyFields = { inherit (pinnedAttrs) runtimeDepPins; } //
         ( lib.optionalAttrs wantsDev { inherit (pinnedAttrs) devDepPins; } );
-    in if wasEmpty then meta else meta // keyFields;
+    in if wasEmpty then meta else meta // {
+      depInfo = ( meta.depInfo or {} ) // keyFields;
+    };
     withPinsList =
       builtins.attrValues ( builtins.mapAttrs addDirectDepKeys ents );
     topo = let
       bDependsOnA = a: b: let
         #bDeps = b.runtimeDepPins // ( b.devDepPins or {} );
-        bDeps = b.runtimeDepPins;
-      in ( b ? runtimeDepPins ) && ( bDeps ? ${a.ident} ) &&
+        bDeps = b.depInfo.runtimeDepPins;
+      in ( b ? depInfo.runtimeDepPins ) && ( bDeps ? ${a.ident} ) &&
          ( bDeps.${a.ident} == a.version ) && ( a.key != b.key );
       sorted = let
         full = lib.toposort bDependsOnA withPinsList;
@@ -361,12 +366,14 @@
           inherit (value.entries.pl2) pkey;
           instances = ( acc.${name}.instances or {} ) // {
             ${pkey} = {
-              inherit (value) runtimeDepPins;
+              inherit (value.depInfo) runtimeDepPins;
               inherit (value.entries) pl2;
-            };
+            } // ( lib.optionalAttrs ( value ? devDepPins ) {
+              inherit (value.depInfo) devDepPins;
+            } );
           };
         in acc // { ${name} = value // { inherit instances; }; };
-      in builtins.foldl' merge {} asNvList;
+      in builtins.foldl' merge { __serial = false; } asNvList;
       __meta = {
         setFromType = "package-lock.json(v2)";
         inherit plock lockDir lockPath metaSetOverlays metaEntOverlays
@@ -374,7 +381,7 @@
       };
     in makeMetaSet ( entsDD // { inherit __meta; } );
     msEx = metaSet.__extend ( lib.composeManyExtensions metaSetOverlays );
-  in addMetaEntriesRuntimeKeys msEx;
+  in msEx;
 
 
 /* -------------------------------------------------------------------------- */
@@ -406,7 +413,7 @@
   formRuntimeClosuresFromTopo = mset: let
     consume = cset: key: let
       runtimeDepKeys = let
-        pins = mset.${key}.runtimeDepPins or {};
+        pins = mset.${key}.depInfo.runtimeDepPins or {};
       in builtins.attrValues ( builtins.mapAttrs ( k: v: "${k}/${v}" ) pins );
       indirects = builtins.concatMap ( key: cset.${key}.runtimeClosureKeys )
                                      runtimeDepKeys;
@@ -497,20 +504,22 @@
 
 /* -------------------------------------------------------------------------- */
 
-  # FIXME: use `__pscope' here for `packNodeTarballAsIs'
+  # These are most useful for `package.json' entries where we may actually
+  # need to perform resolution; they are not very useful for package sets
+  # based on lock files - unless you are composing multiple locks.
+  addNormalizedDepsToMeta = { version, entries, ... } @ meta: let
+    fromEnt = entries.pl2ent or entries.pjs or entries.manifest or
+      entries.packument.versions.${version} or
+      ( throw "Cannot find an entry to lookup dependencies." );
+    norm = lib.libpkginfo.normalizedDepsAll fromEnt;
+    updated  = lib.recursiveUpdate meta.depInfo norm;
+    depInfo = if meta ? depInfo then updated
+                                else ( norm // { __serial = false;  } );
+    addDepInfo = if meta ? __dd then meta.__add else ( b: b // meta );
+  in addDepInfo { inherit depInfo; };
 
-  # Overwrites any existing def
-  extendEntWithTarball = ent: ent.__extend ( final: prev: {
-    tarball = final.__apply packNodeTarballAsIs {};
-  } );
-
-  extendEntAddTarball = ent: ent.__extend ( final: prev: {
-    tarball = prev.tarball or ( final.__apply packNodeTarballAsIs {} );
-  } );
-
-  extendPkgSetAddTarballs = final: prev:
-    builtins.mapAttrs ( _: extendEntAddTarball )
-                      ( removeAttrs prev ["__pscope" "__meta"] );
+  addNormalizedDepsToEnt = { meta, ... } @ ent:
+    ent.__update { meta = addNormalizedDepsToMeta meta; };
 
 
 /* -------------------------------------------------------------------------- */
@@ -540,6 +549,71 @@
   in modules;
 
 
+/* -------------------------------------------------------------------------- */
+
+  makeNodeModulesScope' = {
+    modulesScopeOverlays ? []
+  } @ overlays: { ident, version } @ __pkg: let
+    asIV = _: value:
+      if builtins.isString value then value else value.version;
+    extra = {
+      __cscope = self:
+        ( self.__pscope.__cscope or {} ) //
+        ( builtins.mapAttrs asIV self.__entries ) //
+        ( lib.optionalAttrs ( self ? __pkg ) {
+          ${__pkg.ident} = self.__pkg.version;
+        } );
+      __entries = self:
+        removeAttrs self ( extInfoExtras ++ [
+          "__pscope" "__pkg" "__cscope" "__install" "__version"
+        ] );
+      __serial = self: let
+        fs = builtins.mapAttrs ( k: v: v.__serial or v ) self.__entries;
+      in fs // ( if ( self ? __pscope ) then { inherit (self) __version; } else
+        { __ident = self.__pkg.ident; inherit (self) __version; } );
+      __new = self: lib.libmeta.mkExtInfo' extra;
+      __install = self: fromPath: { ident, version, ... } @ ent: let
+        gv = as: i:
+          if builtins.isString as.${i} then as.${i} else as.${i}.version;
+        scopeHasId    = self.__cscope ? ${ident};
+        scopeHasExact = scopeHasId && ( gv self.__cscope ident ) == version;
+        hereHasId     = self ? ${ident};
+        parentHasId   = ( self ? __pscope ) && scopeHasId && ( ! hereHasId );
+        installHere = self.__update { ${ident} = version; };
+        installParent = let
+          fromPath' = [self.__pkg.ident] ++ fromPath;
+        in self.__update { __pscope = self.__pscope.__install fromPath' ent; };
+        installChild  = let
+          childId   = builtins.head fromPath;
+          child     = self.${childId};
+          fromPath' = builtins.tail fromPath;
+        in self.__update {
+          ${childId} = let
+            asScope = if child ? __update then child else
+              makeNodeModulesScope' overlays {
+                ident   = childId;
+                version = child;
+              };
+            refreshed = asScope.__update { __pscope = self; };
+          in refreshed.__install fromPath' ent;
+        };
+      in if scopeHasExact then self else
+         if ( ! parentHasId ) && ( self ? __pscope ) then installParent else
+         if ( ! hereHasId ) then installHere else
+         if ( fromPath != [] ) then installChild else
+         throw "Unable to install conflicting versions of ${ident}";
+    };
+    scope = lib.libmeta.mkExtInfo' extra ( final: {
+      inherit __pkg;
+      __version = version;
+    } );
+    withOv = let
+      ov = if builtins.isFunction modulesScopeOverlays then modulesScopeOverlays
+           else lib.composeManyExtensions modulesScopeOverlays;
+    in if modulesScopeOverlays == [] then scope else scope.__extend ov;
+  in withOv;
+
+  makeNodeModulesScope = makeNodeModulesScope' {};
 
 /* -------------------------------------------------------------------------- */
 
@@ -566,7 +640,7 @@
 
   extendPkgSetWithNodeModulesDirs = final: prev: let
     needsNm = k: { meta, ... } @ ent:
-      meta ? runtimeClosureKeys || ( meta.entries.pl2.pkey == "" );
+      ( meta ? runtimeClosureKeys ) || ( meta.entries.pl2.pkey == "" );
     nmFor = k: { meta, ... } @ ent: let
       isRoot = meta.entries.pl2.pkey == "";
       ideal = ( idealTreeForRoot prev.__meta.metaSet ) prev;
@@ -786,25 +860,6 @@
 
 /* -------------------------------------------------------------------------- */
 
-  # These are most useful for `package.json' entries where we may actually
-  # need to perform resolution; they are not very useful for package sets
-  # based on lock files - unless you are composing multiple locks.
-  addNormalizedDepsToMeta = { version, entries, ... } @ meta: let
-    fromEnt = entries.pl2ent or entries.pjs or entries.manifest or
-      entries.packument.versions.${version} or
-      ( throw "Cannot find an entry to lookup dependencies." );
-    norm = lib.libpkginfo.normalizedDepsAll fromEnt;
-    updated  = lib.recursiveUpdate meta.depInfo norm;
-    depInfo = if meta ? depInfo then updated
-                                else ( norm // { __serial = false;  } );
-  in meta.__update { inherit depInfo; };
-
-  addNormalizedDepsToEnt = { meta, ... } @ ent:
-    ent.__update { meta = addNormalizedDepsToMeta meta; };
-
-
-/* -------------------------------------------------------------------------- */
-
   # FIXME: Move to fetcher or something?
   unpackSafe = {
     tarball
@@ -833,6 +888,24 @@
     packages = lib.filterAttrs ( k: _: builtins.elem k keys )
                                ( removeAttrs prev ["__pscope" "__meta"] );
   in builtins.mapAttrs ( _: extendEntUseSafeUnpack ) packages;
+
+
+/* -------------------------------------------------------------------------- */
+
+  # FIXME: use `__pscope' here for `packNodeTarballAsIs'
+
+  # Overwrites any existing def
+  extendEntWithTarball = ent: ent.__extend ( final: prev: {
+    tarball = final.__apply packNodeTarballAsIs {};
+  } );
+
+  extendEntAddTarball = ent: ent.__extend ( final: prev: {
+    tarball = prev.tarball or ( final.__apply packNodeTarballAsIs {} );
+  } );
+
+  extendPkgSetAddTarballs = final: prev:
+    builtins.mapAttrs ( _: extendEntAddTarball )
+                      ( removeAttrs prev ["__pscope" "__meta"] );
 
 
 /* -------------------------------------------------------------------------- */
@@ -869,6 +942,8 @@ in {
     makeOuterScope
     makeNodePkgSet'
     makeNodePkgSet
+    makeNodeModulesScope'
+    makeNodeModulesScope
 
     pkgEntFromPjs
     pkgEntriesFromPjs
@@ -878,6 +953,8 @@ in {
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
 
+    addNormalizedDepsToMeta
+    addNormalizedDepsToEnt
     genSetBinPermissionsHook
 
     formRuntimeClosuresFromTopo

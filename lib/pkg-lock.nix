@@ -459,13 +459,16 @@ let
           builtins.mapAttrs pinDep
             ( lib.filterAttrs ( _: v: ! ( v.dev or false ) ) dependencies );
       };
-      dev' = lib.optionalAttrs ( devDependencies != {} ) {
-        devDepPins = let
-          dd = builtins.mapAttrs pinDep devDependencies;
-          d = builtins.mapAttrs pinDep
-                ( lib.filterAttrs ( _: v: ( v.dev or false ) ) dependencies );
-        in dd // d;
-      };
+      hasNormalizedDev =
+        builtins.any ( v: v.dev or false ) ( builtins.attrValues dependencies );
+      dev' =
+        lib.optionalAttrs ( hasNormalizedDev || ( devDependencies != {} ) ) {
+          devDepPins = let
+            dd = builtins.mapAttrs pinDep devDependencies;
+            d = builtins.mapAttrs pinDep
+                  ( lib.filterAttrs ( _: v: ( v.dev or false ) ) dependencies );
+          in dd // d;
+        };
     in { key = "${name}/${version}"; inherit name version; } // rt' // dev';
     pinned = builtins.mapAttrs pinEnt plock.packages;
     renameFromKey = { key, ... } @ value: { inherit value; name = key; };
