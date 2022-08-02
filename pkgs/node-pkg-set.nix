@@ -554,8 +554,10 @@
   makeNodeModulesScope' = {
     modulesScopeOverlays ? []
   } @ overlays: { ident, version } @ __pkg: let
-    asIV = _: value:
-      if builtins.isString value then value else value.version;
+    gv = as: i:
+      if builtins.isString as.${i} then as.${i} else
+        as.${i}.version or as.${i}.__version or as.${i}.__pkg.version;
+    asIV = ident: value: { inherit ident; version = gv { x = value; } "x"; };
     extra = {
       __cscope = self:
         ( self.__pscope.__cscope or {} ) //
@@ -573,32 +575,31 @@
         { __ident = self.__pkg.ident; inherit (self) __version; } );
       __new = self: lib.libmeta.mkExtInfo' extra;
       __install = self: fromPath: { ident, version, ... } @ ent: let
-        gv = as: i:
-          if builtins.isString as.${i} then as.${i} else as.${i}.version;
         scopeHasId    = self.__cscope ? ${ident};
         scopeHasExact = scopeHasId && ( gv self.__cscope ident ) == version;
         hereHasId     = self ? ${ident};
         parentHasId   = ( self ? __pscope ) && scopeHasId && ( ! hereHasId );
         installHere = self.__update { ${ident} = version; };
-        installParent = let
-          fromPath' = [self.__pkg.ident] ++ fromPath;
-        in self.__update { __pscope = self.__pscope.__install fromPath' ent; };
+        #installParent = let
+        #  fromPath' = [self.__pkg.ident] ++ fromPath;
+        #in builtins.trace "parent" ( self.__update { __pscope = self.__pscope.__install fromPath' ent; } );
         installChild  = let
           childId   = builtins.head fromPath;
           child     = self.${childId};
           fromPath' = builtins.tail fromPath;
-        in self.__update {
+        in self.__extend ( final: prev: {
           ${childId} = let
             asScope = if child ? __update then child else
               makeNodeModulesScope' overlays {
                 ident   = childId;
                 version = child;
               };
-            refreshed = asScope.__update { __pscope = self; };
-          in refreshed.__install fromPath' ent;
-        };
+            refreshed = asScope.__update { __pscope = prev; };
+            installed = refreshed.__install fromPath' ent;
+          in installed.__update { __pscope = final; };
+        } );
       in if scopeHasExact then self else
-         if ( ! parentHasId ) && ( self ? __pscope ) then installParent else
+         #if ( ! parentHasId ) && ( self ? __pscope ) then installParent else
          if ( ! hereHasId ) then installHere else
          if ( fromPath != [] ) then installChild else
          throw "Unable to install conflicting versions of ${ident}";
