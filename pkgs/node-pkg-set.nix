@@ -567,22 +567,19 @@
         } );
       __entries = self:
         removeAttrs self ( extInfoExtras ++ [
-          "__pscope" "__pkg" "__cscope" "__install" "__version"
+          "__pscope" "__pkg" "__cscope" "__installOne" "__install" "__version"
         ] );
       __serial = self: let
         fs = builtins.mapAttrs ( k: v: v.__serial or v ) self.__entries;
       in fs // ( if ( self ? __pscope ) then { inherit (self) __version; } else
         { __ident = self.__pkg.ident; inherit (self) __version; } );
       __new = self: lib.libmeta.mkExtInfo' extra;
-      __install = self: fromPath: { ident, version, ... } @ ent: let
+      __installOne = self: fromPath: { ident, version, ... } @ ent: let
         scopeHasId    = self.__cscope ? ${ident};
         scopeHasExact = scopeHasId && ( gv self.__cscope ident ) == version;
         hereHasId     = self ? ${ident};
         parentHasId   = ( self ? __pscope ) && scopeHasId && ( ! hereHasId );
         installHere = self.__update { ${ident} = version; };
-        #installParent = let
-        #  fromPath' = [self.__pkg.ident] ++ fromPath;
-        #in builtins.trace "parent" ( self.__update { __pscope = self.__pscope.__install fromPath' ent; } );
         installChild  = let
           childId   = builtins.head fromPath;
           child     = self.${childId};
@@ -595,14 +592,40 @@
                 version = child;
               };
             refreshed = asScope.__update { __pscope = prev; };
-            installed = refreshed.__install fromPath' ent;
+            installed = refreshed.__installOne fromPath' ent;
           in installed.__update { __pscope = final; };
         } );
       in if scopeHasExact then self else
-         #if ( ! parentHasId ) && ( self ? __pscope ) then installParent else
          if ( ! hereHasId ) then installHere else
          if ( fromPath != [] ) then installChild else
          throw "Unable to install conflicting versions of ${ident}";
+      __install = self: fromPath: x:
+        if builtins.isString x then y: if builtins.isString y then
+          self.__installOne fromPath { ident = x; version = y; }
+        else self.__install fromPath ( { ident = x; } // y ) else let
+          inherit (x) ident version;
+          ent = { inherit (x) ident version; };
+          metaSet = x.metaSet or x.__pscope.__meta.metaSet or (
+            if x ? __pscope.__meta.setFromType then x.__pscope else
+              throw ( "(makeNodeModulesScope:__install:${ident}@${version}): " +
+                      "Cannot locate metaSet" )
+          );
+          meta =
+            if ( x ? depInfo ) then x else if ( x ? meta ) then x.meta else
+            if ( metaSet ? "${ident}/${version}" )
+            then metaSet."${ident}/${version}" else
+              throw ( "(makeNodeModulesScope:__install:${ident}@${version}): " +
+                      "Cannot locate meta" );
+          depPins = meta.depInfo.runtimeDepPins or
+                    metaSet."${ident}/${version}".depInfo.runtimeDepPins or {};
+          pinIVs = builtins.attrValues ( builtins.mapAttrs asIV depPins );
+          withX = self.__installOne fromPath ent;
+          withPins =
+            builtins.foldl' ( acc: acc.__installOne fromPath ) withX pinIVs;
+          installRec = acc: y:
+            acc.__install ( fromPath ++ [y.ident] )
+                          ( y // { inherit metaSet; } );
+        in builtins.foldl' installRec withPins pinIVs;
     };
     scope = lib.libmeta.mkExtInfo' extra ( final: {
       inherit __pkg;
