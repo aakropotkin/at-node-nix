@@ -641,44 +641,52 @@
 
 /* -------------------------------------------------------------------------- */
 
-  # XXX: This must be composed with the group of overlays which adds `prepared'.
-  #extendPkgSetWithNodeModulesDirs = final: prev: let
-  #  setModulesFor = _: value: value.__extend ( eFinal: ePrev: let
-  #    allDevKeys =
-  #      lib.unique ( ePrev.meta.runtimeDepKeys ++ ePrev.meta.devDepKeys );
-  #    k2MD = keys: prev.__pscope.linkModules {
-  #      modules = map ( k: final.${k}.module.outPath ) keys;
-  #    };
-  #  in {
-  #    nodeModulesDir = k2MD ePrev.meta.runtimeDepKeys;
-  #  } // ( lib.optionalAttrs ( ePrev.meta ? devDepKeys ) {
-  #    nodeModulesDir-dev = k2MD allDevKeys;
-  #  } ) );
-  #  # Global Modules also need it but I have to unfuck the cycle chasing first.
-  #  needsNm = k: { meta, ... } @ ent:
-  #    ( meta.hasBuild   or true )        ||
-  #    ( meta.hasInstallScript or false ) ||
-  #    ( meta.hasPrepare or false );
-  #  packages = lib.filterAttrs needsNm ( removeAttrs prev ["__pscope"] );
-  #in builtins.mapAttrs setModulesFor packages;
-
   extendPkgSetWithNodeModulesDirs = final: prev: let
     needsNm = k: { meta, ... } @ ent:
       ( meta ? runtimeClosureKeys ) || ( meta.entries.pl2.pkey == "" );
     nmFor = k: { meta, ... } @ ent: let
       isRoot = meta.entries.pl2.pkey == "";
-      ideal = ( idealTreeForRoot prev.__meta.metaSet ) prev;
+      idealRoot = ( idealTreeForRoot prev.__meta.metaSet ) prev;
+      idealSub = pset: let
+        nms = makeNodeModulesScope { inherit (ent) ident version; };
+        pkey = meta.entries.pl2.pkey;
+        instance =
+          if ( meta ? entries.pl2.pkey ) &&
+             ( meta ? instances.${meta.entries.pl2.pkey} )
+          then ent // {
+            meta = meta // {
+              runtimeDepKeys =
+                meta.instances.${meta.entries.pl2.pkey}.runtimeDepKeys;
+            };
+          } else ent;
+        pins = nms.install [] instance;
+        asLinkModuleEnt = pset: fromPath: ident: x: let
+          version = if builtins.isString x then x else
+            ( x.__version or x.__pkg.version );
+          key = "${ident}/${version}";
+        in {
+          path = pset.${key}.module;
+          to =
+            builtins.concatStringsSep "/node_modules/" ( fromPath ++ [ident] );
+        };
+        collectLMEnts = fromPath: ident: x: let
+          fromAttrs = let
+            fromPath' = fromPath ++ [ident];
+            lmes = builtins.mapAttrs ( collectLMEnts pset fromPath' )
+                                     ( x.__serial or x.__entries or x );
+          in lib.concatLists ( builtins.attrValues lmes );
+          curr = asLinkModuleEnt fromPath ident x;
+        in [curr] ++ ( lib.optionals ( builtins.isAttrs x ) fromAttrs );
+      in collectLMEnts pset [] k ent;
+      ideal = if isRoot then idealRoot else idealSub;
     in if ( ! isRoot ) && ( meta.runtimeClosureKeys == [] ) then null else
        prev.__pscope.linkModules { modules = ideal; };
-    setModulesFor = key: ent: ent.__extend ( _: pPrev:
-      # FIXME: this is just for testing a trivial tree
-      if ent.meta.entries.pl2.pkey != "" then {
-        nodeModulesDir     = null;
-        nodeModulesDir-dev = null;
-      } else ( let nmd = nmFor key pPrev; in {
-        nodeModulesDir     = nmd;
-        nodeModulesDir-dev = nmd;
-                   } ) );
+    setModulesFor = key: ent: ent.__extend ( _: pPrev: {
+      # FIXME: dev dir needs `devDepPins' but routines above only refer
+      #        to `runtimeDepPins'.
+      nodeModulesDir     = nmFor key pPrev;
+      nodeModulesDir-dev = nmFor key pPrev;
+    } );
     packages = lib.filterAttrs needsNm ( removeAttrs prev [
       "__pscope" "__meta"
     ] );
