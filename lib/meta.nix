@@ -202,7 +202,7 @@
       __updateEx = extra': self.__new ( extra // extra' ) self;
       __new      = mkExtInfo' extra;
       __apply    = lib.callPackageWith ( self.__entries // {
-        __pscope = self;
+      __pscope   = self;
       } );
     } // ( builtins.mapAttrs ( _: fn: fn self ) extra );
   in self;
@@ -252,7 +252,8 @@
         bin       = "${final.names.bname}-bin-${prev.version}";
         module    = "${final.names.bname}-module-${prev.version}";
         global    = "${final.names.bname}-${prev.version}";
-      } // ( if final.scoped then { scope = dirOf prev.ident; } else {} );
+      } // ( if final.scoped then { scope = lib.yank "@([^/]+)/.*" prev.ident; }
+                             else {} );
     };
   in em.__extend addNames;
 

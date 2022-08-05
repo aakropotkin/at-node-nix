@@ -69,16 +69,35 @@
 
 /* -------------------------------------------------------------------------- */
 
+  keysAsAttrs = __entriesFn: self: let
+    inherit (builtins) groupBy attrValues mapAttrs replaceStrings head;
+    mapVals = fn: mapAttrs ( _: fn );
+    getScope = { scope ? attrs.meta.names.scope or "_", ... } @ attrs: scope;
+    gs = groupBy getScope ( attrValues ( __entriesFn self ) );
+    getPname = x: baseNameOf x.ident;
+    is = mapVals ( groupBy getPname ) gs;
+    getVers = x: "v${replaceStrings ["." "+"] ["_" "_"] x.version}";
+    vs = mapVals ( mapVals ( ids: mapVals head ( groupBy getVers ids ) ) ) is;
+  in vs;
+
+
+/* -------------------------------------------------------------------------- */
+
   # XXX: Must be a regular `attrset' not a recursive one.
   makeMetaSet = { __meta, ... } @ members: let
     membersR = self:
+      # XXX: You should likely remove `__pscope' here, I am unsure if it is used
+      # but it's an issue considering these members may not be extensible-info.
       ( builtins.mapAttrs ( _: v: v // { __pscope = self; } ) members ) // {
         __meta = __meta // { __serial = false; };
       };
-    extra = {
-      __entries = self: removeAttrs self ( extInfoExtras ++
-                                           ["__meta" "__pscope"] );
+    extra = let
+      __entries = self:
+        removeAttrs self ( extInfoExtras ++ ["__meta" "__pscope" "__unkey"] );
+    in {
+      inherit __entries;
       __new = self: lib.libmeta.mkExtInfo' extra;
+      __unkey = keysAsAttrs __entries;
     };
   in lib.libmeta.mkExtInfo' extra membersR;
 
@@ -119,11 +138,14 @@
 
 
   makeNodePkgSet' = { pkgSetOverlays ? pkgSetDrvsOverlay }: members: let
-    extra = {
+    extra = let
       __entries = self: removeAttrs self ( extInfoExtras ++ [
-        "__pscope" "__meta"
+        "__pscope" "__meta" "__unkey"
       ] );
+    in {
+      inherit __entries;
       __new = self: lib.libmeta.mkExtInfo' extra;
+      __unkey = keysAsAttrs __entries;
     };
     membersR = let
       core = { __pscope = makeOuterScope {}; };
