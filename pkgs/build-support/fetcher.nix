@@ -29,7 +29,9 @@ let
     isPath  = ! ( ( entry ? link ) || ( entry ? resolved ) );
     isRegTb =
       ( ( entry ? integrity ) || ( entry ? sha1 ) ) &&
-      ( entry ? resolved ) && ( lib.test "http.*/-/.*\\.tgz" entry.resolved );
+      ( entry ? resolved ) &&
+      ( ( lib.test "http.*/-/.*\\.tgz" entry.resolved ) ||
+        ( lib.test "https?://npm.pkg.github.com/download/.*" entry.resolved ) );
     isSrcTb =
       ( ( entry ? integrity ) || ( entry ? sha1 ) ) &&
       ( entry ? resolved ) &&

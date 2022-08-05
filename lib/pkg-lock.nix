@@ -201,7 +201,7 @@ let
   in builtins.head tgt;
 
   resolveDepFor = plock: from: ident: let
-    isSub = k: _: lib.test "${from}/node_modules/.*${ident}" k;
+    isSub = k: _: lib.test "${from}/node_modules/[^/]*${ident}" k;
     subs = lib.filterAttrs isSub plock.packages;
     parent = lib.yank "(.*)/node_modules/(@[^/]+/)?[^/]+" from;
     fromParent = resolveDepFor plock parent ident;
@@ -243,7 +243,7 @@ let
   splitNmToAttrPath = nmpath: let
     sp = builtins.tail ( lib.splitString "node_modules/" nmpath );
     stripTrailingSlash = s: let
-      m = lib.yank "(.*[^/])/?" s;
+      m = lib.yank "(.*[^/])/" s;
     in if m == null then s else m;
   in map stripTrailingSlash sp;
 

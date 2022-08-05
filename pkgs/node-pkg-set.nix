@@ -325,6 +325,11 @@
       withOv  = builtins.mapAttrs ( _: e: e.__extend entOv ) metaEnts;
       final   = if metaEntOverlays != [] then withOv else metaEnts;
     in builtins.mapAttrs ( _: e: e.__entries ) final;
+    # XXX: Pins don't account for variations in resolution for nested deps.
+    # This is sort of an issue and may demand a refactor.
+    # Ex: This case isn't "reasonably" handled with the current pinning.
+    #      node_modules/foo/node_modules/bar@1/node_modules/baz@1
+    #      node_modules/bar@1/node_modules/baz@2
     pinned = lib.libplock.pinVersionsFromLockV2 plock;
     addDirectDepKeys = from: meta: let
       pinnedAttrs = pinned.${meta.key};
@@ -340,6 +345,7 @@
     };
     withPinsList =
       builtins.attrValues ( builtins.mapAttrs addDirectDepKeys ents );
+
     topo = let
       bDependsOnA = a: b: let
         #bDeps = b.runtimeDepPins // ( b.devDepPins or {} );
@@ -358,6 +364,7 @@
         msgCycle + "\n" + msgLoop else if ( sorted ? cycle ) then msgCycle else
           if ( sorted ? loops ) then msgLoop else null;
     in if msg != null then builtins.trace msg sorted else sorted;
+
     metaSet = let
       entsDD = let
         nv = { key, ... } @ value: { inherit value; name = key; };
@@ -366,9 +373,10 @@
           inherit (value.entries.pl2) pkey;
           instances = ( acc.${name}.instances or {} ) // {
             ${pkey} = {
-              inherit (value.depInfo) runtimeDepPins;
               inherit (value.entries) pl2;
-            } // ( lib.optionalAttrs ( value ? devDepPins ) {
+            } // ( lib.optionalAttrs ( value ? runtimeDepPins ) {
+              inherit (value.depInfo) runtimeDepPins;
+            } ) // ( lib.optionalAttrs ( value ? devDepPins ) {
               inherit (value.depInfo) devDepPins;
             } );
           };
@@ -409,7 +417,8 @@
 
 /* -------------------------------------------------------------------------- */
 
-  # FIXME: use topo cycle info to handle cyclical deps.
+  # FIXME: This isn't a reasonable option because too many projects have cycles.
+  # I'm going to remove this soon.
   formRuntimeClosuresFromTopo = mset: let
     consume = cset: key: let
       runtimeDepKeys = let
@@ -422,6 +431,7 @@
     in cset // { ${key} = { inherit runtimeClosureKeys; }; };
   in builtins.foldl' consume {} mset.__meta.topo.result;
 
+  # FIXME: either get this to use something other than `topo'; or remove it.
   addMetaEntriesRuntimeKeys = mset: let
     closures = formRuntimeClosuresFromTopo mset;
     addEnt = key: ent: ent // {
@@ -452,6 +462,11 @@
   } @ pl2ent: let
     meta = if pl2ent ? entryFromType then pl2ent else
            ( metaEntFromPlockV2 lockDir pkey pl2ent );
+    # Adds dependencies of this package to a package set.
+    depsOverlay = final: prev: let
+    in {
+
+    };
   in mkExtInfo ( self: let
     tb' = lib.optionalAttrs ( meta.sourceInfo.type == "tarball" ) {
       # FIXME: The fetcher routines weren't originally designed for this, and
@@ -482,7 +497,7 @@
   , lockDir  ? dirOf lockPath
   , lockPath ? "${lockDir}/package-lock.json"
   , pl2metas ? metaEntriesFromPlockV2 ( {
-                   inherit lockDir lockPath plock;
+                 inherit lockDir lockPath plock;
                } // args )
   , ...
   } @ args: let
