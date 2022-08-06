@@ -30,6 +30,9 @@
 
     inherit (final.libpkginfo)
       importJSON'
+      getDepFields
+      getNormalizedDeps
+      addNormalizedDepsToMeta
     ;
 
     inherit (final.libstr)
@@ -61,9 +64,11 @@
     inherit (final.libmeta)
       serialDefault
       mkExtInfo
-      metaCore
+      mkMetaCore
       keysAsAttrs
       mkMetaSet
+      metaEntIsSimple
+      metaSetPartitionSimple
     ;
 
   } );

@@ -223,12 +223,35 @@
   # By default this demands that the package `ident' ( "name" ) and version
   # are provided, and it will add verious derivation names so that they may be
   # consistent across various types of builders.
-  metaCore = {
+  mkMetaCore = {
     key     ? args.ident + "/" + args.version
   , ident   ? dirOf args.key
   , version ? baseNameOf args.key
   } @ args: let
-    em = mkExtInfo {
+    em = mkExtInfo' {
+      __serial = self: let
+        dft = serialDefault self;
+        rmPlV2 = let
+          hide = removeAttrs dft [
+            "hasBin"
+            "hasBuild"
+            "hasPrepare"
+            "hasInstallScript"
+            "gypfile"
+          ];
+          hasTrue = lib.filterAttrs ( _: x: x == true ) {
+            inherit (self) hasBin hasBuild hasPrepare;
+          };
+          inst' = ( lib.optionalAttrs ( self.hasInstallScript or false ) {
+            inherit (self) hasInstallScript;
+          } // ( lib.optionalAttrs ( self ? gypfile ) {
+            inherit (self) gypfile;
+          } ) );
+        in hide // hasTrue // inst';
+        rmExtras =
+          if self.entryFromType == "package-lock.json(v2)" then rmPlV2 else dft;
+      in rmExtras;
+    } {
       inherit key ident version;
       entries.__serial = false;
     };
@@ -295,6 +318,29 @@
 
 /* -------------------------------------------------------------------------- */
 
+  # Determines if a package needs any `nodeModulesDir[-dev]' fields.
+  # If `hasBuild' is not yet set, we will err on the safe side and assume it
+  # has a build.
+  # XXX: It is strongly recommended that you provide a `hasBuild' field.
+  metaEntIsSimple = {
+    hasBuild         ? true
+  , hasInstallScript ? false
+  , hasPrepare       ? false
+  , hasBin           ? false
+  , ...
+  } @ attrs: ! ( hasBuild || hasInstallScript || hasPrepare || hasBin );
+
+  metaSetPartitionSimple = mset: let
+    lst = builtins.attrValues mset.__entries;
+    parted = builtins.partition metaEntIsSimple lst;
+  in {
+    simple       = parted.right;
+    needsModules = parted.wrong;
+  };
+
+
+/* -------------------------------------------------------------------------- */
+
 in {
   inherit
     serialAsIs
@@ -304,8 +350,12 @@ in {
     extInfoExtras
     mkExtInfo'
     mkExtInfo
-    metaCore
+    mkMetaCore
     keysAsAttrs
     mkMetaSet
+  ;
+  inherit
+    metaEntIsSimple
+    metaSetPartitionSimple
   ;
 }

@@ -41,14 +41,10 @@
 
 /* -------------------------------------------------------------------------- */
 
-
-  # TODO:
-  #   FIXME: `__entries' on pkgEnts doesn't exclude `__pscope'.
-
   inherit (lib.libmeta)
     extInfoExtras
     mkExtInfo
-    metaCore
+    mkMetaCore
     keysAsAttrs
     mkMetaSet
   ;
@@ -169,7 +165,7 @@
     in if ( pjent ? bin ) then fromBin else fromBindir;
 
     meta = let
-      core = metaCore { inherit ident version; };
+      core = mkMetaCore { inherit ident version; };
     in core.__update ( {
       entryFromType = "package.json";
       # Kind of superfulous. (std|npm|yarn)[-ws]
@@ -239,7 +235,7 @@
   , ...
   } @ pl2ent: let
     key = ident + "/" + version;
-    entType  = typeOfEntry pl2ent;
+    entType = typeOfEntry pl2ent;
     localPath = ( entType == "path" ) || ( entType == "symlink" );
     pjs = assert localPath; lib.importJSON' "${lockDir}/${pkey}/package.json";
 
@@ -284,7 +280,7 @@
       ( lib.libpkginfo.normalizedDepsAll pl2ent ) // { __serial = false; };
 
     meta = let
-      core = metaCore { inherit ident version; };
+      core = mkMetaCore { inherit ident version; };
     in core.__update ( {
       inherit hasInstallScript hasBin sourceInfo depInfo;
       entryFromType = "package-lock.json(v2)";
@@ -366,29 +362,6 @@
 
 /* -------------------------------------------------------------------------- */
 
-  # Determines if a package needs any `nodeModulesDir[-dev]' fields.
-  # If `hasBuild' is not yet set, we will err on the safe side and assume it
-  # has a build.
-  # XXX: It is strongly recommended that you provide a `hasBuild' field.
-  metaEntIsSimple = {
-    hasBuild         ? true
-  , hasInstallScript ? false
-  , hasPrepare       ? false
-  , hasBin           ? false
-  , ...
-  } @ attrs: ! ( hasBuild || hasInstallScript || hasPrepare || hasBin );
-
-  metaSetPartitionSimple = mset: let
-    lst = builtins.attrValues mset.__entries;
-    parted = builtins.partition metaEntIsSimple lst;
-  in {
-    simple       = parted.right;
-    needsModules = parted.wrong;
-  };
-
-
-/* -------------------------------------------------------------------------- */
-
   # v2 package locks normalize most fields, so for example, `bin' will always
   # be an attrset of name -> path, even if the original `project.json' wrote
   # `"bin": "./foo"' or `"direcories": { "bin": "./scripts" }'.
@@ -456,32 +429,6 @@
 
 
 /* -------------------------------------------------------------------------- */
-
-  # These are most useful for `package.json' entries where we may actually
-  # need to perform resolution; they are not very useful for package sets
-  # based on lock files - unless you are composing multiple locks.
-  addNormalizedDepsToMeta = { version, entries, ... } @ meta: let
-    fromEnt = entries.pl2ent or entries.pjs or entries.manifest or
-      entries.packument.versions.${version} or
-      ( throw "Cannot find an entry to lookup dependencies." );
-    norm = lib.libpkginfo.normalizedDepsAll fromEnt;
-    updated  = lib.recursiveUpdate meta.depInfo norm;
-    depInfo = if meta ? depInfo then updated
-                                else ( norm // { __serial = false;  } );
-    addDepInfo = if meta ? __dd then meta.__add else ( b: b // meta );
-  in addDepInfo { inherit depInfo; };
-
-  addNormalizedDepsToEnt = { meta, ... } @ ent:
-    ent.__update { meta = addNormalizedDepsToMeta meta; };
-
-
-/* -------------------------------------------------------------------------- */
-
-  #treeKeyed = let
-  #  keyFor = pkey: v: let
-  #    ident = v.name or ( lib.yank ".*node_modules/(.*)" pkey );
-  #  in "${ident}/${v.version}";
-  #in builtins.mapAttrs keyFor ( removeAttrs mset.__meta.plock.packages [""] );
 
   # FIXME: this doesn't filter `dev' out.
   idealTreeForRoot = mset: let
@@ -563,7 +510,7 @@
   , name    ? meta.names.built
   , ident   ? meta.ident
   , version ? meta.version or src.version
-  , meta    ? src.meta or lib.libmeta.metaCore { inherit ident version; }
+  , meta    ? src.meta or lib.libmeta.mkMetaCore { inherit ident version; }
   , simple  ? false  # Prevents processing of `meta' - just pack. Name required.
   , source  ? throw "You gotta give me something to work with here"
   , nodeModulesDir-dev ? null
@@ -612,7 +559,7 @@
   , name    ? meta.names.installed
   , ident   ? meta.ident
   , version ? meta.version or src.version
-  , meta    ? src.meta or lib.libmeta.metaCore { inherit ident version; }
+  , meta    ? src.meta or lib.libmeta.mkMetaCore { inherit ident version; }
   , simple  ? false  # Prevents processing of `meta' - just pack. Name required.
   , source  ? throw "You gotta give me something to work with here"
   , built   ? source
@@ -659,7 +606,7 @@
   , name      ? meta.names.prepared
   , ident     ? meta.ident
   , version   ? meta.version or src.version
-  , meta      ? src.meta or lib.libmeta.metaCore { inherit ident version; }
+  , meta      ? src.meta or lib.libmeta.mkMetaCore { inherit ident version; }
   , simple    ? false  # Prevents processing of `meta' just pack. Name required.
   , source    ? throw "You gotta give me something to work with here"
   , built     ? source
@@ -845,8 +792,6 @@ in {
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
 
-    addNormalizedDepsToMeta
-    addNormalizedDepsToEnt
     genSetBinPermissionsHook
 
     extendPkgSetWithNodeModulesDirs
@@ -874,9 +819,6 @@ in {
     unpackSafe
     extendEntUseSafeUnpack
     extendPkgSetWithSafeUnpackList
-
-    metaEntIsSimple
-    metaSetPartitionSimple
 
     pkgSetDrvOverlays
     pkgSetDrvsOverlay

@@ -375,6 +375,33 @@ let
 
 /* -------------------------------------------------------------------------- */
 
+  # These are most useful for `package.json' entries where we may actually
+  # need to perform resolution; they are not very useful for package sets
+  # based on lock files - unless you are composing multiple locks.
+  addNormalizedDepsToMeta = { version, entries, ... } @ meta: let
+    fromEnt = entries.pl2ent or entries.pjs or entries.manifest or
+      entries.packument.versions.${version} or
+      ( throw ( "(addNormalizedDepsToMeta) " +
+                "Cannot find an entry to lookup dependencies" ) );
+    norm = lib.libpkginfo.normalizedDepsAll fromEnt;
+    updated = lib.recursiveUpdate meta.depInfo norm;
+    # XXX: At time of writing `*DepPins' are the only other kinds of fields in
+    # the `depInfo' attrset, and those fields should not be serialzed.
+    # With that in mind, we can simply set `__serial' to our normalized ents.
+    # If `depInfo' is extended in the future, this should be extended to avoid
+    # throwing away other fields which may want to be serialized.
+    __serial = norm;
+    depInfoEnts = if meta ? depInfo then updated else norm;
+    depInfo = depInfoEnts // { inherit __serial; };
+    injectDepInfo = if meta ? __update then meta.__update else ( b: b // meta );
+  in addDepInfo { inherit depInfo; };
+
+  addNormalizedDepsToEnt = { meta, ... } @ ent:
+    ent.__update { meta = addNormalizedDepsToMeta meta; };
+
+
+/* -------------------------------------------------------------------------- */
+
 in {
   #inherit canonicalizePkgName unCanonicalizePkgName;
   inherit
@@ -413,6 +440,8 @@ in {
     normalizedDepFields
     normalizedDepsAll
     getNormalizedDeps
+    addNormalizedDepsToMeta
+    addNormalizedDepsToEnt
   ;
 
   readPkgInfo = path: mkPkgInfo ( pkgJsonFromPath path );
