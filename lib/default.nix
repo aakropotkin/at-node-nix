@@ -11,6 +11,7 @@
     libplock   = callLibs ./pkg-lock.nix;
     libreg     = callLibs ./registry.nix;
     libmeta    = callLibs ./meta.nix;
+    libnm      = callLibs ./nm-scope.nix;
 
     inherit (final.libparse)
       tryParseIdent
@@ -21,6 +22,10 @@
       parseLocator
       nameInfo
       isGitRev
+    ;
+
+    inherit (final.libnm)
+      mkNodeModulesScope
     ;
 
     inherit (final.libpkginfo)
@@ -57,6 +62,8 @@
       serialDefault
       mkExtInfo
       metaCore
+      keysAsAttrs
+      mkMetaSet
     ;
 
   } );
