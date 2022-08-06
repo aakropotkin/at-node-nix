@@ -393,7 +393,7 @@ let
     __serial = norm;
     depInfoEnts = if meta ? depInfo then updated else norm;
     depInfo = depInfoEnts // { inherit __serial; };
-    injectDepInfo = if meta ? __update then meta.__update else ( b: b // meta );
+    injectDepInfo = if meta ? __update then meta.__update else ( b: meta // b );
   in injectDepInfo { inherit depInfo; };
 
   addNormalizedDepsToEnt = { meta, ... } @ ent:
