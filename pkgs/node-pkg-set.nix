@@ -97,6 +97,7 @@
           buildGyp
           genericInstall
           evalScripts
+          copyOut
         ;
       };
       addCore = prev: core // ( builtins.intersectAttrs core prev );
@@ -303,15 +304,16 @@
     plock           ? lib.importJSON' lockPath
   , lockDir         ? dirOf lockPath
   , lockPath        ? "${lockDir}/package-lock.json"
-  , metaEntOverlays ? []
-  , metaSetOverlays ? []
+  , metaEntOverlays ? []  # Applied to individual packages in `metaSet'
+  , metaSetOverlays ? []  # Applied to `metaSet'
   , forceRtDeps     ? []  # list of keys
   , forceDevDeps    ? []  # list of keys
   , ...
   } @ args: assert plock.lockfileVersion == 2; let
     ents = let
       metaEnts = builtins.mapAttrs ( metaEntFromPlockV2 lockDir ) plock.packages;
-      entOv   = lib.composeManyExtensions metaEntOverlays;
+      entOv   = if builtins.isFunction metaEntOverlays then metaEntOverlays else
+                lib.composeManyExtensions metaEntOverlays;
       withOv  = builtins.mapAttrs ( _: e: e.__extend entOv ) metaEnts;
       final   = if metaEntOverlays != [] then withOv else metaEnts;
     in builtins.mapAttrs ( _: e: e.__entries ) final;
@@ -335,26 +337,6 @@
     };
     withPinsList =
       builtins.attrValues ( builtins.mapAttrs addDirectDepKeys ents );
-
-    topo = let
-      bDependsOnA = a: b: let
-        #bDeps = b.runtimeDepPins // ( b.devDepPins or {} );
-        bDeps = b.depInfo.runtimeDepPins;
-      in ( b ? depInfo.runtimeDepPins ) && ( bDeps ? ${a.ident} ) &&
-         ( bDeps.${a.ident} == a.version ) && ( a.key != b.key );
-      sorted = let
-        full = lib.toposort bDependsOnA withPinsList;
-        fullKeyed = builtins.mapAttrs ( _: map ( x: x.key ) ) full;
-      in fullKeyed;
-      msgCycle = "A cycle exists among packages: " +
-                 ( builtins.concatStringsSep " " sorted.cycle );
-      msgLoop = "Loops exists among packages: " +
-                ( builtins.concatStringsSep " " sorted.loops );
-      msg = if ( sorted ? cycle ) && ( sorted ? loops ) then
-        msgCycle + "\n" + msgLoop else if ( sorted ? cycle ) then msgCycle else
-          if ( sorted ? loops ) then msgLoop else null;
-    in if msg != null then builtins.trace msg sorted else sorted;
-
     metaSet = let
       entsDD = let
         nv = { key, ... } @ value: { inherit value; name = key; };
@@ -375,7 +357,7 @@
       __meta = {
         setFromType = "package-lock.json(v2)";
         inherit plock lockDir lockPath metaSetOverlays metaEntOverlays
-                forceRtDeps forceDevDeps topo;
+                forceRtDeps forceDevDeps;
       };
     in mkMetaSet ( entsDD // { inherit __meta; } );
     msEx = metaSet.__extend ( lib.composeManyExtensions metaSetOverlays );
@@ -407,41 +389,6 @@
 
 /* -------------------------------------------------------------------------- */
 
-  # FIXME: This isn't a reasonable option because too many projects have cycles.
-  # I'm going to remove this soon.
-  formRuntimeClosuresFromTopo = mset: let
-    consume = cset: key: let
-      runtimeDepKeys = let
-        pins = mset.${key}.depInfo.runtimeDepPins or {};
-      in builtins.attrValues ( builtins.mapAttrs ( k: v: "${k}/${v}" ) pins );
-      indirects = builtins.concatMap ( key: cset.${key}.runtimeClosureKeys )
-                                     runtimeDepKeys;
-      flat = lib.unique ( runtimeDepKeys ++ indirects );
-      runtimeClosureKeys = builtins.filter ( dk: dk != key ) flat;
-    in cset // { ${key} = { inherit runtimeClosureKeys; }; };
-  in builtins.foldl' consume {} mset.__meta.topo.result;
-
-  # FIXME: either get this to use something other than `topo'; or remove it.
-  addMetaEntriesRuntimeKeys = mset: let
-    closures = formRuntimeClosuresFromTopo mset;
-    addEnt = key: ent: ent // {
-      runtimeClosureKeys =
-        ent.runtimeClosureKeys or closures.${key}.runtimeClosureKeys;
-    };
-    extendEnt = key: ent: ent.__extend ( _: mPrev: {
-      runtimeClosureKeys =
-        mPrev.runtimeClosureKeys or closures.${key}.runtimeClosureKeys;
-    } );
-    processEnt = key: ent: let
-      procFn = if ent ? __extend then extendEnt else addEnt;
-    in procFn key ent;
-    extendSet = final: prev:
-      builtins.mapAttrs processEnt mset.__entries;
-  in if mset.__meta.topo ? result then mset.__extend extendSet else mset;
-
-
-/* -------------------------------------------------------------------------- */
-
   # v2 package locks normalize most fields, so for example, `bin' will always
   # be an attrset of name -> path, even if the original `project.json' wrote
   # `"bin": "./foo"' or `"direcories": { "bin": "./scripts" }'.
@@ -455,7 +402,7 @@
     # Adds dependencies of this package to a package set.
     depsOverlay = final: prev: let
     in {
-
+      # FIXME:
     };
   in mkExtInfo ( self: let
     tb' = lib.optionalAttrs ( meta.sourceInfo.type == "tarball" ) {
@@ -993,7 +940,6 @@ in {
     addNormalizedDepsToEnt
     genSetBinPermissionsHook
 
-    formRuntimeClosuresFromTopo
     addMetaEntriesRuntimeKeys
     extendPkgSetWithNodeModulesDirs
 
