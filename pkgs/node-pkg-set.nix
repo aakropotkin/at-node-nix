@@ -511,7 +511,7 @@
       isRoot = meta.entries.pl2.pkey == "";
       idealRoot = ( idealTreeForRoot prev.__meta.metaSet ) prev;
       idealSub = pset: let
-        nms = makeNodeModulesScope { inherit (ent) ident version; };
+        nms = mkNodeModulesScope { inherit (ent) ident version; };
         pkey = meta.entries.pl2.pkey;
         instance =
           if ( meta ? entries.pl2.pkey ) &&
