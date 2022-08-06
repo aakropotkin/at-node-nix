@@ -94,7 +94,7 @@
       _node-pkg-set = import ./pkgs/node-pkg-set.nix {
         inherit (final) lib evalScripts buildGyp nodejs linkModules;
         inherit (final) runBuild genericInstall packNodeTarballAsIs;
-        inherit (pkgsFor) stdenv jq xcbuild linkFarm untarSanPerms;
+        inherit (pkgsFor) stdenv jq xcbuild linkFarm untarSanPerms copyOut;
         inherit (final._fetcher) typeOfEntry;
         fetcher = final._fetcher.fetcher {
           cwd = throw "Override `cwd' to use local fetchers";  # defer to call-site
@@ -107,7 +107,6 @@
         };
       };
       inherit (final._node-pkg-set)
-        makeMetaSet
         makeOuterScope
         makeNodePkgSet'
         makeNodePkgSet
@@ -156,6 +155,9 @@
 
         metaEntIsSimple
         metaSetPartitionSimple
+
+        pkgSetDrvOverlays
+        pkgSetDrvsOverlay
       ;
 
       genericInstall = import ./pkgs/build-support/genericInstall.nix {
@@ -280,7 +282,7 @@
         inherit runBuild;
         inherit (_mkNodeTarball) packNodeTarballAsIs;
         inherit (nixpkgs.legacyPackages.${system}) stdenv jq xcbuild linkFarm;
-        inherit (ak-nix.trivial.${system}) untarSanPerms;
+        inherit (ak-nix.trivial.${system}) untarSanPerms copyOut;
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
         inherit (_fetcher) typeOfEntry;
         fetcher = _fetcher.fetcher {
@@ -328,7 +330,6 @@
 
       # FIXME: this interface for handling `nodejs' input is hideous
       inherit (_node-pkg-set)
-        makeMetaSet
         makeOuterScope
         makeNodePkgSet'
         makeNodePkgSet
@@ -377,6 +378,9 @@
 
         metaEntIsSimple
         metaSetPartitionSimple
+
+        pkgSetDrvOverlays
+        pkgSetDrvsOverlay
       ;
 
       inherit (_mkNodeTarball)
