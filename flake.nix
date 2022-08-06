@@ -106,59 +106,6 @@
           ;
         };
       };
-      inherit (final._node-pkg-set)
-        makeOuterScope
-        makeNodePkgSet'
-        makeNodePkgSet
-        makeNodeModulesScope'
-        makeNodeModulesScope
-
-        pkgEntFromPjs
-        pkgEntriesFromPjs
-
-        metaEntriesFromPlockV2
-        metaEntFromPlockV2
-        pkgEntFromPlockV2
-        pkgEntriesFromPlockV2
-
-        addNormalizedDepsToMeta
-        addNormalizedDepsToEnt
-        genSetBinPermissionsHook
-
-        formRuntimeClosuresFromTopo
-        addMetaEntriesRuntimeKeys
-        extendPkgSetWithNodeModulesDirs
-
-        extendEntWithTarball
-        extendEntAddTarball
-        extendPkgSetAddTarballs
-
-        extendEntWithBuilt
-        extendEntAddBuilt
-        extendPkgSetWithBuilds
-
-        extendEntWithInstalled
-        extendEntAddInstalled
-        extendPkgSetWithInstalls
-
-        extendEntWithPrepared
-        extendEntAddPrepared
-        extendPkgSetWithPrepares
-
-        extendEntWithModule
-        extendEntAddModule
-        extendPkgSetWithModules
-
-        unpackSafe
-        extendEntUseSafeUnpack
-        extendPkgSetWithSafeUnpackList
-
-        metaEntIsSimple
-        metaSetPartitionSimple
-
-        pkgSetDrvOverlays
-        pkgSetDrvsOverlay
-      ;
 
       genericInstall = import ./pkgs/build-support/genericInstall.nix {
         inherit (final) lib buildGyp evalScripts nodejs;
@@ -216,7 +163,8 @@
         inherit (final.stdenv) system;
       };
 
-    };
+      # FIXME: Cherry pick `_node-pkg-set' imports later.
+    } // final._node-pkg-set;
 
 
 /* -------------------------------------------------------------------------- */
@@ -328,61 +276,6 @@
         runBuild
       ;
 
-      # FIXME: this interface for handling `nodejs' input is hideous
-      inherit (_node-pkg-set)
-        makeOuterScope
-        makeNodePkgSet'
-        makeNodePkgSet
-        makeNodeModulesScope'
-        makeNodeModulesScope
-
-        pkgEntFromPjs
-        pkgEntriesFromPjs
-
-        metaEntriesFromPlockV2
-        metaEntFromPlockV2
-        pkgEntFromPlockV2
-        pkgEntriesFromPlockV2
-
-        addNormalizedDepsToMeta
-        addNormalizedDepsToEnt
-        genSetBinPermissionsHook
-
-        formRuntimeClosuresFromTopo
-        addMetaEntriesRuntimeKeys
-        extendPkgSetWithNodeModulesDirs
-
-        extendEntWithTarball
-        extendEntAddTarball
-        extendPkgSetAddTarballs
-
-        extendEntWithBuilt
-        extendEntAddBuilt
-        extendPkgSetWithBuilds
-
-        extendEntWithInstalled
-        extendEntAddInstalled
-        extendPkgSetWithInstalls
-
-        extendEntWithPrepared
-        extendEntAddPrepared
-        extendPkgSetWithPrepares
-
-        extendEntWithModule
-        extendEntAddModule
-        extendPkgSetWithModules
-
-        unpackSafe
-        extendEntUseSafeUnpack
-        extendPkgSetWithSafeUnpackList
-
-        metaEntIsSimple
-        metaSetPartitionSimple
-
-        pkgSetDrvOverlays
-        pkgSetDrvsOverlay
-      ;
-
       inherit (_mkNodeTarball)
         packNodeTarballAsIs
         unpackNodeTarball
@@ -427,8 +320,11 @@
         inherit lib;
         enableTraces = true;
       };
-  
-    } ) ) // { __functor = nodeutilsSelf: system: nodeutilsSelf.${system}; };
+
+      # FIXME: Cherry pick `_node-pkg-set' imports later.
+    } // _node-pkg-set ) ) // {
+      __functor = nodeutilsSelf: system: nodeutilsSelf.${system};
+    };
 
 
 /* -------------------------------------------------------------------------- */

@@ -417,11 +417,12 @@
       source = unpackSafe self;
     };
   in {
-    inherit version __pscope meta;
+    inherit version __pscope;
     inherit (meta) ident key;
     source = let
       fetcherFor = __pscope.__pscope.fetcher // { cwd = lockDir; };
     in fetcherFor pkey meta.entries.pl2;
+    meta = removeAttrs meta ["__pscope"];
   } // tb' );
 
 
@@ -940,7 +941,6 @@ in {
     addNormalizedDepsToEnt
     genSetBinPermissionsHook
 
-    addMetaEntriesRuntimeKeys
     extendPkgSetWithNodeModulesDirs
 
     extendEntWithTarball
@@ -969,6 +969,9 @@ in {
 
     metaEntIsSimple
     metaSetPartitionSimple
+
+    pkgSetDrvOverlays
+    pkgSetDrvsOverlay
   ;
 }
 
