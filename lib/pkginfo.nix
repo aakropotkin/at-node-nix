@@ -394,7 +394,7 @@ let
     depInfoEnts = if meta ? depInfo then updated else norm;
     depInfo = depInfoEnts // { inherit __serial; };
     injectDepInfo = if meta ? __update then meta.__update else ( b: b // meta );
-  in addDepInfo { inherit depInfo; };
+  in injectDepInfo { inherit depInfo; };
 
   addNormalizedDepsToEnt = { meta, ... } @ ent:
     ent.__update { meta = addNormalizedDepsToMeta meta; };
