@@ -13,7 +13,6 @@
 , nodejs
 , jq
 , packNodeTarballAsIs
-#, newScope  # nixpkgs.legacyPackages.${system}.newScope
 , ...
 } @ globalAttrs: let
 
