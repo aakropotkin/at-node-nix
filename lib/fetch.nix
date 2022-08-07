@@ -26,7 +26,7 @@
       ( ( entry ? integrity ) || ( entry ? sha1 ) ) &&
       ( entry ? resolved ) &&
       ( ( lib.test "http.*/-/.*\\.tgz" entry.resolved ) ||
-        ( lib.test "https?://npm.pkg.github.com/download/.*" entry.resolved ) );
+        ( lib.test "https?://npm.pkg.github.com/.*" entry.resolved ) );
     isSrcTb =
       ( ( entry ? integrity ) || ( entry ? sha1 ) ) &&
       ( entry ? resolved ) &&
@@ -42,6 +42,11 @@
      if isSrcTb then "source-tarball"   else
      throw "(typeOfEntry) Unrecognized entry type: ${builtins.toJSON entry}";
 
+
+/* -------------------------------------------------------------------------- */
+
+  # Given a set of `nodeFetchers' which satisfy the expected interfaces -
+  # Return the fetch function for the given `type'
   fetcherForType = {
     tarballFetcher
   , urlFetcher
@@ -49,13 +54,13 @@
   , linkFetcher
   , dirFetcher
   , ...
-  } @ config: type:
-    if type == "symlink"          then config.linkFetcher     else
-    if type == "path"             then config.dirFetcher      else
-    if type == "git"              then config.gitFetcher      else
-    if type == "registry-tarball" then config.tarballFetcher  else
-    if type == "source-tarball"   then config.tarballFetcher  else
-    throw "(fetcher:doFetch) Unrecognized entry type: ${type}";
+  } @ nodeFetchers: type:
+    if type == "symlink"          then nodeFetchers.linkFetcher     else
+    if type == "path"             then nodeFetchers.dirFetcher      else
+    if type == "git"              then nodeFetchers.gitFetcher      else
+    if type == "registry-tarball" then nodeFetchers.tarballFetcher  else
+    if type == "source-tarball"   then nodeFetchers.tarballFetcher  else
+    throw "(fetcherForType) Unrecognized entry type: ${type}";
 
 
 /* -------------------------------------------------------------------------- */

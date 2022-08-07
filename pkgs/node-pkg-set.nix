@@ -1,5 +1,4 @@
 { lib
-, typeOfEntry
 , fetcher      # A configured `fetcher' from `./build-support/fetcher.nix'.
 , buildGyp
 , evalScripts

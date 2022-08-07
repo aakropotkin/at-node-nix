@@ -82,7 +82,6 @@
         inherit (final) lib evalScripts buildGyp nodejs linkModules;
         inherit (final) runBuild genericInstall packNodeTarballAsIs;
         inherit (pkgsFor) stdenv jq xcbuild linkFarm untarSanPerms copyOut;
-        inherit (final._fetcher) typeOfEntry;
         fetcher = final._fetcher.fetcher {
           cwd = throw "Override `cwd' to use local fetchers";  # defer to call-site
           preferBuiltins  = true;
@@ -108,8 +107,6 @@
         inherit (final) lib;
         inherit (pkgsFor) fetchurl fetchgit fetchzip;
       } )
-        typeOfEntry
-        fetcherForType
         plock2TbFetchArgs
         plock2GitFetchArgs
         plock2LinkFetchArgs
@@ -196,7 +193,6 @@
         inherit (nixpkgs.legacyPackages.${system}) stdenv jq xcbuild linkFarm;
         inherit (ak-nix.trivial.${system}) untarSanPerms copyOut;
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
-        inherit (_fetcher) typeOfEntry;
         fetcher = _fetcher.fetcher {
           cwd = throw "Override `cwd' to use local fetchers";  # defer to call-site
           preferBuiltins  = true;
@@ -245,8 +241,6 @@
       ;
 
       inherit (_fetcher)
-        typeOfEntry
-        fetcherForType
         plock2TbFetchArgs
         plock2GitFetchArgs
         plock2LinkFetchArgs

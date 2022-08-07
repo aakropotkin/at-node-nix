@@ -292,8 +292,6 @@ let
 
 in {
   inherit
-    typeOfEntry
-    fetcherForType
     plock2TbFetchArgs
     plock2GitFetchArgs
     plock2LinkFetchArgs

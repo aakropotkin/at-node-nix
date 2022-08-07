@@ -57,7 +57,7 @@
     in norm;
 
     meta = let
-      core = lib.libmet.mkMetaCore { inherit ident version; };
+      core = lib.libmeta.mkMetaCore { inherit ident version; };
     in core.__update ( {
       inherit hasInstallScript hasBin sourceInfo depInfo;
       entryFromType = "package-lock.json(v2)";
