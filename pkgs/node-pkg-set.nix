@@ -200,12 +200,22 @@
     pjs     ? lib.importJSON' pjsPath
   , pjsDir  ? dirOf pjsPath
   , pjsPath ? "${pjsDir}/package.json"
-  } @ args: let
-    isWsRoot =
-      ( pjs ? workspaces ) && ( ! ( ( pjs ? name ) || ( pjs ? version ) ) );
-    wsEntries = pkgEntriesFromPjs' args;
-    __rootKey = "${pjs.name}/${pjs.version}";
-  in wsEntries // ( lib.optionalAttrs isWsRoot { inherit __rootKey; } );
+  # FIXME: actually support these.
+  #, metaEntOverlays ? []  # Applied to individual packages in `metaSet'
+  #, metaSetOverlays ? []  # Applied to `metaSet'
+  #, forceRtDeps     ? []  # list of keys
+  #, forceDevDeps    ? []  # list of keys
+  , ...
+  } @ args:
+  ( pkgEntriesFromPjs' args ) // {
+    # FIXME: follow rest of `__meta' patterns used by plockV2.
+    __meta = let
+      isWsRoot =
+        ( pjs ? workspaces ) && ( ! ( ( pjs ? name ) || ( pjs ? version ) ) );
+    in { inherit pjs pjsDir pjsPath; } // ( lib.optionalAttrs isWsRoot {
+      rootKey = "${pjs.name}/${pjs.version}";
+    } );
+  };
 
 
 /* -------------------------------------------------------------------------- */
@@ -305,8 +315,10 @@
       # Ex: This case isn't "reasonably" handled with the current pinning.
       #      node_modules/foo/node_modules/bar@1/node_modules/baz@1
       #      node_modules/bar@1/node_modules/baz@2
+      # More accurate pin information is stored in `meta.instances.*' which is
+      # what you should use when creating a final derivation scope.
       pinned = lib.libplock.pinVersionsFromLockV2 plock;
-      addDirectDepKeys = from: meta: let
+      addDirectDepPins = from: meta: let
         pinnedAttrs = pinned.${meta.key};
         wasEmpty = ! ( ( pinnedAttrs ? runtimeDepPins ) ||
                        ( pinnedAttrs ? devDepPins ) );
@@ -323,7 +335,7 @@
           } else { __serial = false; };
         in lib.recursiveUpdate old keyFields;
       };
-    in builtins.attrValues ( builtins.mapAttrs addDirectDepKeys ents );
+    in builtins.attrValues ( builtins.mapAttrs addDirectDepPins ents );
     metaSet = let
       entsDD = let
         nv = { key, ... } @ value: { inherit value; name = key; };
@@ -341,14 +353,16 @@
           };
         in acc // { ${name} = value // { inherit instances; }; };
       in builtins.foldl' merge { __serial = false; } asNvList;
-      __meta = {
+      __meta = let
+        hasRootPkg = ( plock ? name ) && ( plock ? version );
+        rootKey = "${plock.name}/${plock.version}";
+      in {
         setFromType = "package-lock.json(v2)";
         inherit plock lockDir lockPath metaSetOverlays metaEntOverlays
                 forceRtDeps forceDevDeps;
-      };
+      } // ( lib.optionalAttrs hasRootPkg { inherit rootKey;} );
     in mkMetaSet ( entsDD // { inherit __meta; } );
-    msEx = metaSet.__extend ( lib.composeManyExtensions metaSetOverlays );
-  in msEx;
+  in metaSet.__extend ( lib.composeManyExtensions metaSetOverlays );
 
 
 /* -------------------------------------------------------------------------- */

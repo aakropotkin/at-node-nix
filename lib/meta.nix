@@ -302,7 +302,7 @@
   keysAsAttrs = __entriesFn: self: let
     inherit (builtins) groupBy attrValues mapAttrs replaceStrings head;
     mapVals = fn: mapAttrs ( _: fn );
-    getScope = { scope ? attrs.meta.names.scope or "_", ... } @ attrs: scope;
+    getScope = x: x.scope or x.names.scope or x.meta.names.scope or "_";
     gs = groupBy getScope ( attrValues ( __entriesFn self ) );
     getPname = x: baseNameOf x.ident;
     is = mapVals ( groupBy getPname ) gs;
