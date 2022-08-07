@@ -10,8 +10,13 @@
     libattrs   = prev.libattrs // ( callLibs ./attrsets.nix );
     libplock   = callLibs ./pkg-lock.nix;
     libreg     = callLibs ./registry.nix;
-    libmeta    = callLibs ./meta.nix;
     libnm      = callLibs ./nm-scope.nix;
+    libmeta    = callLibs ./meta.nix;
+    libfetch   = callLibs ./fetch.nix;
+
+    # Hidden libs, get rolled into others.
+    # This is just so they can be organized as separate files.
+    __libmeta-pl2 = callLibs ./meta-ent-plock-v2.nix;
 
     inherit (final.libparse)
       tryParseIdent
@@ -71,5 +76,21 @@
       metaSetPartitionSimple
     ;
 
+    inherit (final.libfetch)
+      typeOfEntry
+    ;
+
+    inherit (final.__libmeta-pl2)
+      metaEntFromPlockV2
+      metaEntriesFromPlockV2
+    ;
+
   } );
-in lib'
+
+  hidden = let
+    ex = lib'.extend ( final: prev: {
+      libmeta = prev.libmeta // prev.__libmeta-pl2;
+    } );
+  in removeAttrs ex ["__libmeta-pl2"];
+
+in hidden

@@ -65,19 +65,6 @@
         inherit (pkgsFor) stdenv jq nodejs;
       };
 
-      runInstallScripts = args: let
-        installed = final.evalScripts ( {
-          runScripts  = ["preinstall" "install" "postinstall"];
-          skipMissing = true;
-        } // args );
-        warnMsg = "WARNING: " +
-         "attempting to run installation scripts on a package which " +
-         "uses `node-gyp' - you likely want to use `buildGyp' instead.";
-        maybeWarn = x:
-          if ( args.gypfile or args.meta.gypfile or false ) then
-            ( builtins.trace warnMsg x ) else x;
-      in maybeWarn installed;
-
       inherit ( import ./pkgs/build-support/mkNodeTarball.nix {
         inherit (pkgsFor) linkFarm linkToPath untar tar;
         inherit (final) lib pacotecli;
@@ -117,7 +104,6 @@
         inherit (pkgsFor) stdenv jq;
       };
 
-
       inherit ( import ./pkgs/build-support/fetcher.nix {
         inherit (final) lib;
         inherit (pkgsFor) fetchurl fetchgit fetchzip;
@@ -132,15 +118,6 @@
         defaultFetchers
         getPreferredFetchers
         fetcher
-      ;
-
-      inherit ( import ./pkgs/build-support/plock-to-node-modules-dir.nix {
-        inherit (final) lib linkModules mkNodeTarball;
-        fetcher = builtins.fetchTree; # FIXME: Write a real fetcher
-      } )
-        plockEntryFetchUnpack
-        plock2nmFocus
-        plock2nm
       ;
 
       yml2json = import ./pkgs/build-support/yml-to-json.nix {
@@ -211,19 +188,6 @@
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
       };
 
-      runInstallScripts = args: let
-        installed = evalScripts ( {
-          runScripts  = ["preinstall" "install" "postinstall"];
-          skipMissing = true;
-        } // args );
-        warnMsg = "WARNING: " +
-         "attempting to run installation scripts on a package which " +
-         "uses `node-gyp' - you likely want to use `buildGyp' instead.";
-        maybeWarn = x:
-          if ( args.gypfile or args.meta.gypfile or false ) then
-            ( builtins.trace warnMsg x ) else x;
-      in maybeWarn installed;
-
       # FIXME: this interface for handling `nodejs' input is hideous
       _node-pkg-set = import ./pkgs/node-pkg-set.nix {
         inherit lib evalScripts buildGyp linkModules genericInstall;
@@ -258,11 +222,6 @@
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
       };
 
-      _plock2nm = import ./pkgs/build-support/plock-to-node-modules-dir.nix {
-        inherit lib linkModules;
-        inherit (_mkNodeTarball) mkNodeTarball;
-        fetcher = builtins.fetchTree; # FIXME: Write a real fetcher
-      };
     in {
 
       pacotecli = pacotecli system;
@@ -271,7 +230,6 @@
         snapDerivation
         buildGyp
         evalScripts
-        runInstallScripts
         genericInstall
         runBuild
       ;
@@ -299,12 +257,6 @@
         fetcher
       ;
 
-      inherit (_plock2nm)
-        plockEntryFetchUnpack
-        plock2nmFocus
-        plock2nm
-      ;
-
       yml2json = import ./pkgs/build-support/yml-to-json.nix {
         inherit (nixpkgs.legacyPackages.${system}) yq runCommandNoCC;
       };
@@ -320,7 +272,6 @@
         inherit lib;
         enableTraces = true;
       };
-
       # FIXME: Cherry pick `_node-pkg-set' imports later.
     } // _node-pkg-set ) ) // {
       __functor = nodeutilsSelf: system: nodeutilsSelf.${system};
@@ -332,13 +283,10 @@
     packages = eachDefaultSystemMap ( system: let
       pkgsFor = nixpkgs.legacyPackages.${system};
     in {
-
       inherit (pacoteFlake.packages.${system}) pacote;
-
       npm-why = ( import ./pkgs/development/node-packages/npm-why {
         pkgs = pkgsFor;
       } ).npm-why;
-
       # I am aware of how goofy this is.
       # I am aware that I could use `prefetch' - this is more convenient
       # considering this isn't a permament fixture.
@@ -362,22 +310,14 @@
           _runnit "$( _abspath "$1"; )";
         fi
       '';
-
     } );
 
 
 /* -------------------------------------------------------------------------- */
 
-    apps = eachDefaultSystemMap ( system: let
-      pkgsFor = nixpkgs.legacyPackages.${system};
-    in {
-
-      # Yeah, we're recursively calling Nix.
-      genFlakeInputs = {
-        type = "app";
-        program = self.packages.${system}.genFlakeInputs.outPath;
-      };
-
+    apps = eachDefaultSystemMap ( system: {
+      genFlakeInputs.type = "app";
+      genFlakeInputs.program = self.packages.${system}.genFlakeInputs.outPath;
     } );
 
 

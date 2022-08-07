@@ -112,261 +112,6 @@
 
 /* -------------------------------------------------------------------------- */
 
-  # `package.json' -> entry.
-  # No resolution is attempted.
-  # No workspaces are processed ( see `pkgEntriesFromPjs' for that ).
-  pkgEntFromPjs = pjsDir: {
-    version ? "0.0.0-null"
-  , ident   ? pjent.name or "@name-undeclared/${baseNameOf pjsDir}"
-  , gypfile ? ( builtins.pathExists "${pjsDir}/binding.gyp" )
-  , hasBin  ? ( ( pjent.bin or {} ) != {} ) || ( pjent ? directories.bin )
-  , hasBuild ?
-    ( pjent ? scripts.prebuild ) || ( pjent ? scripts.build ) ||
-    ( pjent ? scripts.postbuild )
-  , hasInstallScript ?
-    ( pjent ? scripts.preinstall ) || ( pjent ? scripts.install ) ||
-    ( pjent ? scripts.postinstall ) || gypfile
-  , hasPrepare ?
-    ( pjent ? scripts.preprepare ) || ( pjent ? scripts.prepare ) ||
-    ( pjent ? scripts.postprepare )
-  , hasWorkspace ? pjent ? workspaces
-  , __pscope ? makeNodePkgSet {}
-  , ...
-  } @ pjent: let
-    key = ident + "/" + version;
-    # FIXME:
-    # We want to hit the `dirFetcher', we could invoke it directly, but we'll
-    # stick to the "real interface" which will recognize the empty set as a
-    # "path entry" ( it is based on `package-lock(v2)' style entries ).
-    source = ( __pscope.__pscope.fetcher // { cwd = pjsDir; } ) "" {};
-    bin = let
-      # XXX: This is a reserved value.
-      # It helps us avoid dynamically creating a list of bins at build time.
-      # FIXME: if there aren't scripts to evaluate you can use `readDir'.
-      fromBindir = { "__DIR__" = pjent.directories.bin; };
-      fromBin = if ( builtins.isAttrs pjent.bin ) then pjent.bin else
-                { ${baseNameOf ident} = pjent.bin; };
-    in if ( pjent ? bin ) then fromBin else fromBindir;
-
-    meta = let
-      core = mkMetaCore { inherit ident version; };
-    in core.__update ( {
-      entryFromType = "package.json";
-      # Kind of superfulous. (std|npm|yarn)[-ws]
-      entrySubtype = "std" + ( lib.optionalString hasWorkspace "-ws" );
-      inherit hasWorkspace hasBin hasBuild hasInstallScript hasPrepare gypfile;
-      sourceInfo = { inherit (source) narHash; path = pjsDir; };
-      entries = { __serial = false; pjs = pjent // { inherit pjsDir; }; };
-    } // ( lib.optionalAttrs hasBin { inherit bin; } )
-    // ( lib.optionalAttrs hasWorkspace {
-      workspaces = lib.libpkginfo.normalizeWorkspaces pjent;
-    } ) );
-  in mkExtInfo { inherit key ident version meta source __pscope; };
-
-
-/* -------------------------------------------------------------------------- */
-
-  # `package.json' -> entries.
-  # Processes workspaces, but no resolution is attempted.
-  pkgEntriesFromPjs' = {
-    pjs     ? lib.importJSON' pjsPath
-  , pjsDir  ? dirOf pjsPath
-  , pjsPath ? "${pjsDir}/package.json"
-  }: let
-    isWsRoot =
-      ( pjs ? workspaces ) && ( ! ( ( pjs ? name ) || ( pjs ? version ) ) );
-    package  = if isWsRoot then [] else [( pkgEntFromPjs pjsDir pjs )];
-    wsPaths  = lib.libpkginfo.workspacePackages pjsDir pjs;
-    entForDir = d: pkgEntFromPjs d ( lib.importJSON' "${d}/package.json" );
-    wsEnts = map entForDir wsPaths;
-    packages = builtins.genericClosure {
-      startSet = package ++ wsEnts;
-      operator = item: let
-        pjsDir'  = item.meta.entries.pjs.pjsDir;
-        pjs'     = item.meta.entries.pjs;
-        wsPaths' = lib.libpkginfo.workspacePackages pjsDir' pjs';
-        wsEnts'  = map entForDir wsPaths';
-      in wsEnts';
-    };
-    ents = builtins.foldl' ( acc: v: acc // { ${v.key} = v; } ) {} packages;
-  in ents;
-
-  # `package.json' -> entries.
-  # The "root project" is indicated using the attr `__rootKey'.
-  #
-  # FIXME: Resolve deps from `wsEntries' and fallback to registry?
-  #        This might make more sense in a later overlay instead though.
-  pkgEntriesFromPjs = {
-    pjs     ? lib.importJSON' pjsPath
-  , pjsDir  ? dirOf pjsPath
-  , pjsPath ? "${pjsDir}/package.json"
-  # FIXME: actually support these.
-  #, metaEntOverlays ? []  # Applied to individual packages in `metaSet'
-  #, metaSetOverlays ? []  # Applied to `metaSet'
-  #, forceRtDeps     ? []  # list of keys
-  #, forceDevDeps    ? []  # list of keys
-  , ...
-  } @ args:
-  ( pkgEntriesFromPjs' args ) // {
-    # FIXME: follow rest of `__meta' patterns used by plockV2.
-    __meta = let
-      isWsRoot =
-        ( pjs ? workspaces ) && ( ! ( ( pjs ? name ) || ( pjs ? version ) ) );
-    in { inherit pjs pjsDir pjsPath; } // ( lib.optionalAttrs isWsRoot {
-      rootKey = "${pjs.name}/${pjs.version}";
-    } );
-  };
-
-
-/* -------------------------------------------------------------------------- */
-
-  metaEntFromPlockV2 = lockDir: pkey: {
-    version
-  , hasInstallScript ? false
-  , hasBin   ? ( pl2ent.bin or {} ) != {}
-  , ident    ? pl2ent.name or
-               ( lib.libstr.yank' ".*node_modules/((@[^@/]+/)?[^@/]+)" pkey )
-  , ...
-  } @ pl2ent: let
-    key = ident + "/" + version;
-    entType = typeOfEntry pl2ent;
-    localPath = ( entType == "path" ) || ( entType == "symlink" );
-    pjs = assert localPath; lib.importJSON' "${lockDir}/${pkey}/package.json";
-
-    isTb = ( entType == "registry-tarball" ) || ( entType == "source-tarball" );
-    isRemoteSrc = ( entType == "git" ) || ( entType == "source-tarball" );
-
-    hasBuild' = lib.optionalAttrs ( entType != "git" ) {
-      hasBuild = let
-        checkScripts = ( pjs ? scripts ) && (
-          ( pjs ? scripts.prebuild ) ||
-          ( pjs ? scripts.build ) ||
-          ( pjs ? scripts.postbuild )
-        );
-      in ( ! isTb ) && checkScripts;
-    };
-
-    hasPrepare' = lib.optionalAttrs ( entType != "git" ) {
-      hasPrepare = localPath && ( pjs ? scripts ) && (
-        ( pjs ? scripts.preprepare ) ||
-        ( pjs ? scripts.prepare ) ||
-        ( pjs ? scripts.postprepare )
-      );
-    };
-
-    sourceInfo = let
-      type = if localPath then "path" else if isTb then "tarball" else "git";
-      hash' = lib.optionalAttrs ( pl2ent ? integrity ) {
-        hash = pl2ent.integrity;
-      };
-      url' = lib.optionalAttrs ( ! localPath ) {
-        url = pl2ent.resolved;
-      };
-      path' = lib.optionalAttrs localPath {
-        path = let
-          relDir = if pl2ent ? resolved then "/${pl2ent.resolved}" else
-            if pkey == "" then "" else "/${pkey}";
-        in "${lockDir}${relDir}";
-      };
-    in { inherit type; } // hash' // url' // path';
-
-    depInfo = let
-      norm = lib.libpkginfo.normalizedDepsAll pl2ent;
-    in norm;
-
-    meta = let
-      core = mkMetaCore { inherit ident version; };
-    in core.__update ( {
-      inherit hasInstallScript hasBin sourceInfo depInfo;
-      entryFromType = "package-lock.json(v2)";
-      entrySubtype = entType;
-      entries = {
-        __serial = false;
-        pl2 = pl2ent // { inherit pkey lockDir; };
-      } // ( lib.optionalAttrs localPath { inherit pjs; } );
-    } // hasBuild' // hasPrepare' //
-    ( lib.optionalAttrs hasBin { inherit (pl2ent) bin; } ) );
-  in meta;
-
-
-/* -------------------------------------------------------------------------- */
-
-  metaEntriesFromPlockV2 = {
-    plock           ? lib.importJSON' lockPath
-  , lockDir         ? dirOf lockPath
-  , lockPath        ? "${lockDir}/package-lock.json"
-  , metaEntOverlays ? []  # Applied to individual packages in `metaSet'
-  , metaSetOverlays ? []  # Applied to `metaSet'
-  , forceRtDeps     ? []  # list of keys
-  , forceDevDeps    ? []  # list of keys
-  , ...
-  } @ args: assert plock.lockfileVersion == 2; let
-    ents = let
-      metaEnts = builtins.mapAttrs ( metaEntFromPlockV2 lockDir )
-                                   plock.packages;
-      entOv = if builtins.isFunction metaEntOverlays then metaEntOverlays else
-              lib.composeManyExtensions metaEntOverlays;
-      withOv = builtins.mapAttrs ( _: e: e.__extend entOv ) metaEnts;
-      final = if metaEntOverlays != [] then withOv else metaEnts;
-    in final;
-    withPinsList = let
-      # XXX: Pins don't account for variations in resolution for nested deps.
-      # This is sort of an issue and may demand a refactor.
-      # Ex: This case isn't "reasonably" handled with the current pinning.
-      #      node_modules/foo/node_modules/bar@1/node_modules/baz@1
-      #      node_modules/bar@1/node_modules/baz@2
-      # More accurate pin information is stored in `meta.instances.*' which is
-      # what you should use when creating a final derivation scope.
-      pinned = lib.libplock.pinVersionsFromLockV2 plock;
-      addDirectDepPins = from: meta: let
-        pinnedAttrs = pinned.${meta.key};
-        wasEmpty = ! ( ( pinnedAttrs ? runtimeDepPins ) ||
-                       ( pinnedAttrs ? devDepPins ) );
-        wantsDev =
-          ( pinnedAttrs ? devDepPins ) &&
-          ( ( builtins.elem meta.key forceDevDeps ) ||
-            ( ( meta.sourceInfo.type != "tarball" ) && meta.hasBuild ) );
-        keyFields = { inherit (pinnedAttrs) runtimeDepPins; } //
-          ( lib.optionalAttrs wantsDev { inherit (pinnedAttrs) devDepPins; } );
-      in if wasEmpty then meta else meta // {
-        depInfo = let
-          old = if ( meta ? depInfo ) then meta.depInfo // {
-            __serial = meta.depInfo.__serial or meta.depInfo;
-          } else { __serial = false; };
-        in lib.recursiveUpdate old keyFields;
-      };
-    in builtins.attrValues ( builtins.mapAttrs addDirectDepPins ents );
-    metaSet = let
-      entsDD = let
-        nv = { key, ... } @ value: { inherit value; name = key; };
-        asNvList = map nv withPinsList;
-        merge = acc: { name, value }: let
-          inherit (value.entries.pl2) pkey;
-          instances = ( acc.${name}.instances or {} ) // {
-            ${pkey} = {
-              inherit (value.entries) pl2;
-            } // ( lib.optionalAttrs ( value ? depInfo.runtimeDepPins ) {
-              inherit (value.depInfo) runtimeDepPins;
-            } ) // ( lib.optionalAttrs ( value ? depInfo.devDepPins ) {
-              inherit (value.depInfo) devDepPins;
-            } );
-          };
-        in acc // { ${name} = value // { inherit instances; }; };
-      in builtins.foldl' merge { __serial = false; } asNvList;
-      __meta = let
-        hasRootPkg = ( plock ? name ) && ( plock ? version );
-        rootKey = "${plock.name}/${plock.version}";
-      in {
-        setFromType = "package-lock.json(v2)";
-        inherit plock lockDir lockPath metaSetOverlays metaEntOverlays
-                forceRtDeps forceDevDeps;
-      } // ( lib.optionalAttrs hasRootPkg { inherit rootKey;} );
-    in mkMetaSet ( entsDD // { inherit __meta; } );
-  in metaSet.__extend ( lib.composeManyExtensions metaSetOverlays );
-
-
-/* -------------------------------------------------------------------------- */
-
   # v2 package locks normalize most fields, so for example, `bin' will always
   # be an attrset of name -> path, even if the original `project.json' wrote
   # `"bin": "./foo"' or `"direcories": { "bin": "./scripts" }'.
@@ -376,7 +121,7 @@
   , ...
   } @ pl2ent: let
     meta = if pl2ent ? entryFromType then pl2ent else
-           ( metaEntFromPlockV2 lockDir pkey pl2ent );
+           ( lib.metaEntFromPlockV2 lockDir pkey pl2ent );
   in mkExtInfo ( self: let
     tb' = lib.optionalAttrs ( meta.sourceInfo.type == "tarball" ) {
       # FIXME: The fetcher routines weren't originally designed for this, and
@@ -408,7 +153,7 @@
     plock    ? lib.importJSON' lockPath
   , lockDir  ? dirOf lockPath
   , lockPath ? "${lockDir}/package-lock.json"
-  , pl2metas ? metaEntriesFromPlockV2 ( {
+  , pl2metas ? lib.metaEntriesFromPlockV2 ( {
                  inherit lockDir lockPath plock;
                } // args )
   , ...
@@ -785,11 +530,6 @@ in {
     makeNodePkgSet'
     makeNodePkgSet
 
-    pkgEntFromPjs
-    pkgEntriesFromPjs
-
-    metaEntFromPlockV2
-    metaEntriesFromPlockV2
     pkgEntFromPlockV2
     pkgEntriesFromPlockV2
 
