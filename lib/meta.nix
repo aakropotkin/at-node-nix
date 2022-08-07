@@ -92,7 +92,7 @@
 
   extInfoExtras = [
     "__update" "__add" "__extend" "__apply" "__serial" "__entries" "__unfix__"
-    "__updateEx" "__new"
+    "__updateEx" "__extendEx" "__new"
   ];
   # The simplest type of serializer.
   serialAsIs   = self: removeAttrs self ( extInfoExtras ++ ["passthru"] );
@@ -199,15 +199,31 @@
       __serial   = __serial self;
       __entries  = __entries self;
       __unfix__  = infoR;
-      __updateEx = extra': self.__new ( extra // extra' ) self;
+      __updateEx = extra': mkExtInfo' ( extra // extra' ) self;
+      __extendEx = extraR: mkExtInfo' ( extraR extra ) self;
       __new      = mkExtInfo' extra;
-      __apply    = lib.callPackageWith ( self.__entries // {
-      __pscope   = self;
-      } );
+      __apply =
+        lib.callPackageWith ( self.__entries // { __pscope = self; } );
     } // ( builtins.mapAttrs ( _: fn: fn self ) extra );
   in self;
 
   mkExtInfo = mkExtInfo' {};
+
+
+/* -------------------------------------------------------------------------- */
+
+  entryFromTypes = [
+    "package.json"
+    "package-lock.json"      # Detect version
+    "package-lock.json(v1)"
+    "package-lock.json(v2)"
+    "yarn.lock"              # Detect version
+    "yarn.lock(v1)"
+    "yarn.lock(v2)"
+    "yarn.lock(v3)"
+    "manifest"
+    "packument"
+  ];
 
 
 /* -------------------------------------------------------------------------- */
@@ -298,13 +314,10 @@
 /* -------------------------------------------------------------------------- */
 
   # XXX: Must be a regular `attrset' not a recursive one.
-  mkMetaSet = { __meta, ... } @ members: let
-    membersR = self:
-      # XXX: You should likely remove `__pscope' here, I am unsure if it is used
-      # but it's an issue considering these members may not be extensible-info.
-      ( builtins.mapAttrs ( _: v: v // { __pscope = self; } ) members ) // {
-        __meta = __meta // { __serial = false; };
-      };
+  mkMetaSet = members: let
+    membersR = self: members // {
+      __meta = ( members.__meta or {} ) // { __serial = false; };
+    };
     extra = let
       __entries = self:
         removeAttrs self ( extInfoExtras ++ ["__meta" "__pscope" "__unkey"] );
@@ -353,6 +366,7 @@ in {
     mkMetaCore
     keysAsAttrs
     mkMetaSet
+    entryFromTypes
   ;
   inherit
     metaEntIsSimple

@@ -52,22 +52,6 @@
 
 /* -------------------------------------------------------------------------- */
 
-  entryFromTypes = [
-    "package.json"
-    "package-lock.json"      # Detect version
-    "package-lock.json(v1)"
-    "package-lock.json(v2)"
-    "yarn.lock"              # Detect version
-    "yarn.lock(v1)"
-    "yarn.lock(v2)"
-    "yarn.lock(v3)"
-    "manifest"
-    "packument"
-  ];
-
-
-/* -------------------------------------------------------------------------- */
-
   makeOuterScope = members: let
     extra = {
       __serial = self: {
@@ -276,8 +260,9 @@
       };
     in { inherit type; } // hash' // url' // path';
 
-    depInfo =
-      ( lib.libpkginfo.normalizedDepsAll pl2ent ) // { __serial = false; };
+    depInfo = let
+      norm = lib.libpkginfo.normalizedDepsAll pl2ent;
+    in norm;
 
     meta = let
       core = mkMetaCore { inherit ident version; };
@@ -307,32 +292,38 @@
   , ...
   } @ args: assert plock.lockfileVersion == 2; let
     ents = let
-      metaEnts = builtins.mapAttrs ( metaEntFromPlockV2 lockDir ) plock.packages;
-      entOv   = if builtins.isFunction metaEntOverlays then metaEntOverlays else
-                lib.composeManyExtensions metaEntOverlays;
-      withOv  = builtins.mapAttrs ( _: e: e.__extend entOv ) metaEnts;
-      final   = if metaEntOverlays != [] then withOv else metaEnts;
-    in builtins.mapAttrs ( _: e: e.__entries ) final;
-    # XXX: Pins don't account for variations in resolution for nested deps.
-    # This is sort of an issue and may demand a refactor.
-    # Ex: This case isn't "reasonably" handled with the current pinning.
-    #      node_modules/foo/node_modules/bar@1/node_modules/baz@1
-    #      node_modules/bar@1/node_modules/baz@2
-    pinned = lib.libplock.pinVersionsFromLockV2 plock;
-    addDirectDepKeys = from: meta: let
-      pinnedAttrs = pinned.${meta.key};
-      wasEmpty =
-        ! ( ( pinnedAttrs ? runtimeDepPins ) || ( pinnedAttrs ? devDepPins ) );
-      wantsDev = ( pinnedAttrs ? devDepPins ) &&
-                 ( ( builtins.elem meta.key forceDevDeps ) ||
-                   ( ( meta.sourceInfo.type != "tarball" ) && meta.hasBuild ) );
-      keyFields = { inherit (pinnedAttrs) runtimeDepPins; } //
-        ( lib.optionalAttrs wantsDev { inherit (pinnedAttrs) devDepPins; } );
-    in if wasEmpty then meta else meta // {
-      depInfo = ( meta.depInfo or {} ) // keyFields;
-    };
-    withPinsList =
-      builtins.attrValues ( builtins.mapAttrs addDirectDepKeys ents );
+      metaEnts = builtins.mapAttrs ( metaEntFromPlockV2 lockDir )
+                                   plock.packages;
+      entOv = if builtins.isFunction metaEntOverlays then metaEntOverlays else
+              lib.composeManyExtensions metaEntOverlays;
+      withOv = builtins.mapAttrs ( _: e: e.__extend entOv ) metaEnts;
+      final = if metaEntOverlays != [] then withOv else metaEnts;
+    in final;
+    withPinsList = let
+      # XXX: Pins don't account for variations in resolution for nested deps.
+      # This is sort of an issue and may demand a refactor.
+      # Ex: This case isn't "reasonably" handled with the current pinning.
+      #      node_modules/foo/node_modules/bar@1/node_modules/baz@1
+      #      node_modules/bar@1/node_modules/baz@2
+      pinned = lib.libplock.pinVersionsFromLockV2 plock;
+      addDirectDepKeys = from: meta: let
+        pinnedAttrs = pinned.${meta.key};
+        wasEmpty = ! ( ( pinnedAttrs ? runtimeDepPins ) ||
+                       ( pinnedAttrs ? devDepPins ) );
+        wantsDev =
+          ( pinnedAttrs ? devDepPins ) &&
+          ( ( builtins.elem meta.key forceDevDeps ) ||
+            ( ( meta.sourceInfo.type != "tarball" ) && meta.hasBuild ) );
+        keyFields = { inherit (pinnedAttrs) runtimeDepPins; } //
+          ( lib.optionalAttrs wantsDev { inherit (pinnedAttrs) devDepPins; } );
+      in if wasEmpty then meta else meta // {
+        depInfo = let
+          old = if ( meta ? depInfo ) then meta.depInfo // {
+            __serial = meta.depInfo.__serial or meta.depInfo;
+          } else { __serial = false; };
+        in lib.recursiveUpdate old keyFields;
+      };
+    in builtins.attrValues ( builtins.mapAttrs addDirectDepKeys ents );
     metaSet = let
       entsDD = let
         nv = { key, ... } @ value: { inherit value; name = key; };
@@ -342,9 +333,9 @@
           instances = ( acc.${name}.instances or {} ) // {
             ${pkey} = {
               inherit (value.entries) pl2;
-            } // ( lib.optionalAttrs ( value ? runtimeDepPins ) {
+            } // ( lib.optionalAttrs ( value ? depInfo.runtimeDepPins ) {
               inherit (value.depInfo) runtimeDepPins;
-            } ) // ( lib.optionalAttrs ( value ? devDepPins ) {
+            } ) // ( lib.optionalAttrs ( value ? depInfo.devDepPins ) {
               inherit (value.depInfo) devDepPins;
             } );
           };
@@ -372,11 +363,6 @@
   } @ pl2ent: let
     meta = if pl2ent ? entryFromType then pl2ent else
            ( metaEntFromPlockV2 lockDir pkey pl2ent );
-    # Adds dependencies of this package to a package set.
-    depsOverlay = final: prev: let
-    in {
-      # FIXME:
-    };
   in mkExtInfo ( self: let
     tb' = lib.optionalAttrs ( meta.sourceInfo.type == "tarball" ) {
       # FIXME: The fetcher routines weren't originally designed for this, and
@@ -387,6 +373,7 @@
         inherit (self.meta.sourceInfo) url hash;
         unpack = false;
       };
+      # This overrides the default fetcher invoked in the block below.
       source = unpackSafe self;
     };
   in {
@@ -414,12 +401,12 @@
   } @ args: let
     mkPkgEnt = __pscope: k: v:
       pkgEntFromPlockV2 lockDir v.entries.pl2.pkey
-                                ( v // { inherit __pscope; } );
+                                ( v.__update { inherit __pscope; } );
     pl2entsR = let
       ents = pl2metas.__entries;
     in self: ( ( builtins.mapAttrs ( mkPkgEnt self ) ents ) // {
       __meta.__serial = false;
-      __meta.metaSet  = pl2metas;
+      __meta.metaSet = pl2metas;
     } );
     nodePkgs = let
       mnps = if ! ( args ? pkgSetOverlays ) then makeNodePkgSet else
