@@ -471,10 +471,61 @@ let
         };
     in { key = "${name}/${version}"; inherit name version; } // rt' // dev';
     pinned = builtins.mapAttrs pinEnt plock.packages;
-    renameFromKey = { key, ... } @ value: { inherit value; name = key; };
-    renamed =
-      builtins.listToAttrs ( map renameFromKey ( builtins.attrValues pinned ) );
-  in renamed;
+    renamed = let
+      renameFromKey = { key, ... } @ value: {
+        name  = key;
+        value = removeAttrs value ["pkey" "key" "name" "version"];
+      };
+    in builtins.listToAttrs
+      ( map renameFromKey ( builtins.attrValues pinned ) );
+    # It is with a heavy heart that I added support for "instances"; known as
+    # "ABI Conflicts" in compiled languages ( the most dangerous category of
+    # undefined behavior ).
+    # If your code breaks because of "instances", it's possible that there is a
+    # bug here in this routine, but know that I will not respond to any issues
+    # or PRs which relate to this "feature".
+    # If your code-base depends on instances, then it should be refactored or
+    # put down like the rabid animal that it is.
+    # The idea that other package managers allow this would be comical if not
+    # for how dangerous it were in real world software that real people
+    # depend on.
+    # Reliance on "instances" indicates that a project has sprawled without
+    # sane regard for interface design; and reflects poorly on the authors who
+    # produced those interfaces.
+    # If you file a bug about how you `node-gyp' build is selecting the wrong
+    # `nan' version when deeply nested in `node_modules/' directories, I will
+    # mock you and likely make snide remarks about how "you should never have
+    # transfered out that MBA program at University".
+    # The software we write is used in infrastructure that everyday people
+    # depend on to pay their bills, access health care, and communicate with one
+    # another - when those systems are poorly engineered or maintained there are
+    # real world consequences.
+    # My critique of these failure on the part of authors is not merely to call
+    # them "stupid", I sincerely fear that they are unknowingly putting others
+    # at risk by their own ignorance or lack of education in core
+    # Software Engineering fundamentals, which cannot easily be conveyed leaving
+    # me with only "have you considered other career paths?" to get the desired
+    # point across.
+    instances = let
+      pushDownPkey =
+        builtins.mapAttrs ( pkey: v: v // { inherit pkey; } ) pinned;
+      kg = builtins.groupBy ( x: x.key ) ( builtins.attrValues pushDownPkey );
+      count = _: gents: let
+        all = builtins.length gents;
+        uniq = lib.unique ( map ( m: removeAttrs m ["pkey"] ) gents );
+      in ( 1 < all ) && ( 1 < ( builtins.length uniq ) );
+      need = lib.filterAttrs count kg;
+      byPkey = _: builtins.listToAttrs ( { pkey, ... } @ value: {
+        name = pkey;
+        value.instances = removeAttrs value ["pkey" "key" "name" "version"];
+      } );
+      insts = builtins.mapAttrs byPkey need;
+      warn =
+        "WARNING: Conflicting instances of packages were detected in your lock"
+        + "XXX: Seriously, I know you blow off warnings, this is actually bad "
+        + "and you need to take immediate action.";
+    in if ( insts != {} ) then builtins.trace warn insts else {};
+  in renamed // instances; # this clobbers
 
 
 /* -------------------------------------------------------------------------- */

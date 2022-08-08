@@ -84,57 +84,23 @@
   , ...
   } @ args: assert plock.lockfileVersion == 2; let
     ents = let
-      metaEnts = builtins.mapAttrs ( metaEntFromPlockV2 lockDir )
-                                   plock.packages;
+      pins = lib.libplock.pinVersionsFromLockV2 plock;
+      metaEnts = let
+        wf = builtins.mapAttrs ( metaEntFromPlockV2 lockDir ) plock.packages;
+        addPin = e: e.__extend ( _: prev: {
+          depInfo = ( prev.depInfo or { __serial = false; } ) // pins.${e.key};
+        } );
+        lst = map ( { key, ... } @ value: {
+          name  = key;
+          value = addPin value;
+        } ) ( builtins.attrValues wf );
+      in builtins.listToAttrs lst;
       entOv = if builtins.isFunction metaEntOverlays then metaEntOverlays else
               lib.composeManyExtensions metaEntOverlays;
       withOv = builtins.mapAttrs ( _: e: e.__extend entOv ) metaEnts;
       final = if metaEntOverlays != [] then withOv else metaEnts;
     in final;
-    withPinsList = let
-      # XXX: Pins don't account for variations in resolution for nested deps.
-      # This is sort of an issue and may demand a refactor.
-      # Ex: This case isn't "reasonably" handled with the current pinning.
-      #      node_modules/foo/node_modules/bar@1/node_modules/baz@1
-      #      node_modules/bar@1/node_modules/baz@2
-      # More accurate pin information is stored in `meta.instances.*' which is
-      # what you should use when creating a final derivation scope.
-      pinned = lib.libplock.pinVersionsFromLockV2 plock;
-      addDirectDepPins = from: meta: let
-        pinnedAttrs = pinned.${meta.key};
-        wasEmpty = ! ( ( pinnedAttrs ? runtimeDepPins ) ||
-                       ( pinnedAttrs ? devDepPins ) );
-        wantsDev =
-          ( pinnedAttrs ? devDepPins ) &&
-          ( ( builtins.elem meta.key forceDevDeps ) ||
-            ( ( meta.sourceInfo.type != "tarball" ) && meta.hasBuild ) );
-        keyFields = { inherit (pinnedAttrs) runtimeDepPins; } //
-          ( lib.optionalAttrs wantsDev { inherit (pinnedAttrs) devDepPins; } );
-      in if wasEmpty then meta else meta // {
-        depInfo = let
-          old = if ( meta ? depInfo ) then meta.depInfo // {
-            __serial = meta.depInfo.__serial or meta.depInfo;
-          } else { __serial = false; };
-        in lib.recursiveUpdate old keyFields;
-      };
-    in builtins.attrValues ( builtins.mapAttrs addDirectDepPins ents );
     metaSet = let
-      entsDD = let
-        nv = { key, ... } @ value: { inherit value; name = key; };
-        asNvList = map nv withPinsList;
-        merge = acc: { name, value }: let
-          inherit (value.entries.pl2) pkey;
-          instances = ( acc.${name}.instances or {} ) // {
-            ${pkey} = {
-              inherit (value.entries) pl2;
-            } // ( lib.optionalAttrs ( value ? depInfo.runtimeDepPins ) {
-              inherit (value.depInfo) runtimeDepPins;
-            } ) // ( lib.optionalAttrs ( value ? depInfo.devDepPins ) {
-              inherit (value.depInfo) devDepPins;
-            } );
-          };
-        in acc // { ${name} = value // { inherit instances; }; };
-      in builtins.foldl' merge { __serial = false; } asNvList;
       __meta = let
         hasRootPkg = ( plock ? name ) && ( plock ? version );
         rootKey = "${plock.name}/${plock.version}";
@@ -143,7 +109,7 @@
         inherit plock lockDir lockPath metaSetOverlays metaEntOverlays
                 forceRtDeps forceDevDeps;
       } // ( lib.optionalAttrs hasRootPkg { inherit rootKey;} );
-    in lib.libmeta.mkMetaSet ( entsDD // { inherit __meta; } );
+    in lib.libmeta.mkMetaSet ( ents // { inherit __meta; } );
   in metaSet.__extend ( lib.composeManyExtensions metaSetOverlays );
 
 
