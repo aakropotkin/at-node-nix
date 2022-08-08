@@ -88,7 +88,9 @@
           withX = self.__installOne fromPath ent;
           withPins =
             builtins.foldl' ( acc: acc.__installOne fromPath ) withX pinIVs;
-          installRec = acc: y: acc.__install ( fromPath ++ [y.ident] ) y;
+          installRec = acc: y:
+            acc.__install ( fromPath ++ [y.ident] )
+                          ( { inherit metaSet; } // y );
         in builtins.foldl' installRec withPins pinIVs;
     };
     scope = lib.libmeta.mkExtInfo' extra ( final: {
@@ -103,36 +105,45 @@
 
   mkNodeModulesScope = mkNodeModulesScope' {};
 
-  #mkNodeModulesScope = args: let
-  #  ident = args.ident or ( dirOf ( args.key or args.__meta.rootKey ) );
-  #  version =
-  #    args.version or ( baseNameOf ( args.key or args.__meta.rootKey ) );
-  #  __pkg = { inherit ident version; };
-  #  config' =
-  #    builtins.intersectAttrs ( builtins.functionArgs mkNodeModulesScope' )
-  #                            args;
-  #  config = if ! ( args ? __meta ) then config' else {
-  #      metaSet = args;
-  #      dev = true;
-  #    } // config';
-  #  nmScope = mkNodeModulesScope' config __pkg;
-  #in if ( config == {} ) then nmScope else nmScope.__install [] __pkg;
-
 
 /* -------------------------------------------------------------------------- */
 
   mkNodeModulesScopeFromMetaSet = ms: {
-    key                 ? ms.__meta.rootKey
-  , root                ? ms.${key}
-  , dev                 ? false
-  , moduleScopeOverlays ? []
-  , useInstances        ? true
+    key                  ? ms.__meta.rootKey
+  , root                 ? ms.${key}
+  # This differs from the meaning in `mkNodeModulesScope' which treats
+  # `dev' "recursively".
+  # Here this means "install the dev deps for the root package".
+  , dev                  ? false
+  , modulesScopeOverlays ? []
+  #, useInstances        ? false # FIXME:
   } @ config: let
-    rId   = root.ident;
-    rVers = root.version;
-    base  = mkNodeModulesScope;
-    startPathLockRel = if ( key == ms.__meta.rootKey ) then [] else
-      lib.libplock.splitNmToAttrPath root.entries.pl2.pkey;
+    # FIXME: XXX: `dev' shouldn't be passed here
+    base  = mkNodeModulesScope' { inherit dev modulesScopeOverlays; }
+                                { inherit (root) ident version; };
+  #  pinIVs = ident: version: { inherit ident version; metaSet = ms; };
+  #  withRt =
+  #    builtins.foldl' ( acc: acc.__install [] ) base
+  #      ( builtins.attrValues
+  #        ( builtins.mapAttrs pinIVs root.depInfo.runtimeDepPins ) );
+  #  withDev =
+  #    builtins.foldl' ( acc: acc.__install [] ) withRt
+  #      ( builtins.attrValues
+  #        ( builtins.mapAttrs pinIVs root.depInfo.runtimeDepPins ) );
+  #in if dev then withDev else withRt;
+  in base.__install [] { inherit (root) ident version; metaSet = ms; };
+
+
+/* -------------------------------------------------------------------------- */
+
+in {
+  inherit
+    mkNodeModulesScope'
+    mkNodeModulesScope
+    mkNodeModulesScopeFromMetaSet
+  ;
+}
+
     # Lookup pins for `key', using "instance" information associated with
     # `fromPath' it exists.
     # NOTE: It is very rare that instances are defined unless you have an
@@ -165,7 +176,10 @@
     # I pray for that God may take mercy on the souls of those so called
     # "Software Developers" who created the  need for this "feature":
     #   Do better.
+    /*
     pinsFor = key: fromPath: let
+      startPathLockRel = if ( key == ms.__meta.rootKey ) then [] else
+        lib.libplock.splitNmToAttrPath root.entries.pl2.pkey;
       rtNi = ms.${key}.depInfo.runtimeDepPins or {};
       dNi  = lib.optionalAttrs dev ( ms.${key}.depInfo.devDepPins or {} );
       # If there are 0 or 1 instances, don't bother fooling with the `relPath'.
@@ -188,114 +202,4 @@
               then ( ms.${key}.instances.${nmPath}.devDepPins or dNi )
               else dNi;
     in rtFor // devFor;
-  in { /* FIXME: actually finish this */ };
-
-
-/* -------------------------------------------------------------------------- */
-
-in {
-  inherit
-    mkNodeModulesScope'
-    mkNodeModulesScope
-  ;
-}
-
-/*
-{ lib }: let
-
-  mkNodeModulesScope' = {
-    modulesScopeOverlays ? []
-  } @ overlays: { ident, version } @ __pkg: let
-    gv = as: i:
-      if builtins.isString as.${i} then as.${i} else
-        as.${i}.version or as.${i}.__version or as.${i}.__pkg.version;
-    asIV = ident: value: { inherit ident; version = gv { x = value; } "x"; };
-    extra = {
-      __cscope = self:
-        ( self.__pscope.__cscope or {} ) //
-        ( builtins.mapAttrs asIV self.__entries ) //
-        ( lib.optionalAttrs ( self ? __pkg ) {
-          ${__pkg.ident} = self.__pkg.version;
-        } );
-      __entries = self:
-        removeAttrs self ( extInfoExtras ++ [
-          "__pscope" "__pkg" "__cscope" "__installOne" "__install" "__version"
-        ] );
-      __serial = self: let
-        fs = builtins.mapAttrs ( k: v: v.__serial or v ) self.__entries;
-      in fs // ( if ( self ? __pscope ) then { inherit (self) __version; } else
-        { __ident = self.__pkg.ident; inherit (self) __version; } );
-      __new = self: lib.libmeta.mkExtInfo' extra;
-      __installOne = self: fromPath: { ident, version, ... } @ ent: let
-        scopeHasId    = self.__cscope ? ${ident};
-        scopeHasExact = scopeHasId && ( gv self.__cscope ident ) == version;
-        hereHasId     = self ? ${ident};
-        parentHasId   = ( self ? __pscope ) && scopeHasId && ( ! hereHasId );
-        installHere = self.__update { ${ident} = version; };
-        installChild  = let
-          childId   = builtins.head fromPath;
-          child     = self.${childId};
-          fromPath' = builtins.tail fromPath;
-        in self.__extend ( final: prev: {
-          ${childId} = let
-            asScope = if child ? __update then child else
-              mkNodeModulesScope' overlays {
-                ident   = childId;
-                version = child;
-              };
-            refreshed = asScope.__update { __pscope = prev; };
-            installed = refreshed.__installOne fromPath' ent;
-          in installed.__update { __pscope = final; };
-        } );
-      in if scopeHasExact then self else
-         if ( ! hereHasId ) then installHere else
-         if ( fromPath != [] ) then installChild else
-         throw "Unable to install conflicting versions of ${ident}";
-      __install = self: fromPath: x:
-        if builtins.isString x then y: if builtins.isString y then
-          self.__installOne fromPath { ident = x; version = y; }
-        else self.__install fromPath ( { ident = x; } // y ) else let
-          inherit (x) ident version;
-          ent = { inherit (x) ident version; };
-          metaSet = x.metaSet or x.__pscope.__meta.metaSet or (
-            if x ? __pscope.__meta.setFromType then x.__pscope else
-              throw ( "(mkNodeModulesScope:__install:${ident}@${version}): " +
-                      "Cannot locate metaSet" )
-          );
-          meta =
-            if ( x ? depInfo ) then x else if ( x ? meta ) then x.meta else
-            if ( metaSet ? "${ident}/${version}" )
-            then metaSet."${ident}/${version}" else
-              throw ( "(mkNodeModulesScope:__install:${ident}@${version}): " +
-                      "Cannot locate meta" );
-          depPins = meta.depInfo.runtimeDepPins or
-                    metaSet."${ident}/${version}".depInfo.runtimeDepPins or {};
-          pinIVs = builtins.attrValues ( builtins.mapAttrs asIV depPins );
-          withX = self.__installOne fromPath ent;
-          withPins =
-            builtins.foldl' ( acc: acc.__installOne fromPath ) withX pinIVs;
-          installRec = acc: y:
-            acc.__install ( fromPath ++ [y.ident] )
-                          ( y // { inherit metaSet; } );
-        in builtins.foldl' installRec withPins pinIVs;
-    };
-    scope = lib.libmeta.mkExtInfo' extra ( final: {
-      inherit __pkg;
-      __version = version;
-    } );
-    withOv = let
-      ov = if builtins.isFunction modulesScopeOverlays then modulesScopeOverlays
-           else lib.composeManyExtensions modulesScopeOverlays;
-    in if modulesScopeOverlays == [] then scope else scope.__extend ov;
-  in withOv;
-
-  mkNodeModulesScope = mkNodeModulesScope' {};
-
-
-in {
-  inherit
-    mkNodeModulesScope'
-    mkNodeModulesScope
-  ;
-}
-*/
+    */
