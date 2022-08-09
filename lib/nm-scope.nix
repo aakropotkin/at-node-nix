@@ -4,12 +4,13 @@
 
   mkNodeModulesScope' = {
     modulesScopeOverlays ? []
-  , dev                  ? false
+  , __metaSet            ? throw "(mkNodeModulesScope): Cannot locate metaSet"
+  , ...
   } @ config: { ident, version, ... } @ __pkg: let
-    gv = as: i:
-      if builtins.isString as.${i} then as.${i} else
-        as.${i}.version or as.${i}.__version or as.${i}.__pkg.version;
-    asIV = ident: value: { inherit ident; version = gv { x = value; } "x"; };
+    errTag = "mkNodeModulesScope:${ident}@${version}";
+    gv = x: if builtins.isString x then x else
+            x.version or x.__version or x.__pkg.version;
+    asIV = ident: value: { inherit ident; version = gv value; };
     extra = {
       __cscope = self:
         ( self.__pscope.__cscope or {} ) //
@@ -20,37 +21,93 @@
       __entries = self:
         removeAttrs self ( lib.libmeta.extInfoExtras ++ [
           "__pscope" "__pkg" "__cscope" "__installOne" "__install" "__version"
+          "__metaSet"
         ] );
       __serial = self: let
         fs = builtins.mapAttrs ( k: v: v.__serial or v ) self.__entries;
-      in fs // ( if ( self ? __pscope ) then { inherit (self) __version; } else
-        { __ident = self.__pkg.ident; inherit (self) __version; } );
+        fsc = lib.filterAttrs ( _: v: ! ( v.stub or false ) ) fs;
+        vs = if ( self ? __pscope ) then { inherit (self) __version; } else
+             { __ident = self.__pkg.ident; inherit (self) __version; };
+      in if ( fsc == {} ) then version else ( fsc // vs );
       __new = self: lib.libmeta.mkExtInfo' extra;
       __installOne = self: fromPath: { ident, version, ... } @ ent: let
         scopeHasId    = self.__cscope ? ${ident};
-        scopeHasExact = scopeHasId && ( gv self.__cscope ident ) == version;
+        scopeHasExact = scopeHasId && ( gv self.__cscope.${ident} ) == version;
         hereHasId     = self ? ${ident};
+        hereHasStub   = hereHasId && ( self.${ident}.stub or false );
         parentHasId   = ( self ? __pscope ) && scopeHasId && ( ! hereHasId );
-        installHere = self.__update { ${ident} = version; };
-        installChild  = let
-          childId   = builtins.head fromPath;
-          child     = self.${childId};
-          fromPath' = builtins.tail fromPath;
-        in self.__extend ( final: prev: {
+        childId   = builtins.head fromPath;
+        fromPath' = builtins.tail fromPath;
+        extendChild = x: final: prev: {
           ${childId} = let
-            asScope = if child ? __update then child else
-              mkNodeModulesScope' { inherit modulesScopeOverlays; } {
+            child = prev.${childId};
+            asScope = if child ? __installOne then child else
+              mkNodeModulesScope' config {
                 ident   = childId;
-                version = child;
+                version = gv prev.${childId};
               };
+            # Update `__pscope' entry of child before attempting install.
             refreshed = asScope.__update { __pscope = prev; };
-            installed = refreshed.__installOne fromPath' ent;
+            # Install the package. This will produce a stub in the child.
+            installed = refreshed.__installOne fromPath' x;
+            # Mirror sync `__pscope' with child to reflect update.
           in installed.__update { __pscope = final; };
-        } );
-      in if scopeHasExact then self else
-         if ( ! hereHasId ) then installHere else
-         if ( fromPath != [] ) then installChild else
-         throw "Unable to install conflicting versions of ${ident}";
+        };
+        addFromPath = let
+          ex = self.__update {
+            ${ident} = self.${ident} // {
+              fromPaths = self.${ident}.fromPaths ++ [fromPath];
+            };
+          };
+          pass = ex.__extend ( extendChild ent );
+        in assert ( self ? ${ident}.fromPaths );
+          if ( builtins.elem fromPath self.${ident}.fromPaths ) then self else
+          if ( fromPath != [] ) then pass else ex;
+        installHere = let
+          installed = self.__update {
+            ${ident} = {
+              inherit version;
+              fromPaths = [fromPath];
+              __serial = version;
+            };
+          };
+          pass = installed.__extend ( extendChild ent );
+          reinstallChildren = let
+            oldEnt = { inherit ident; version = self.${ident}.version; };
+            froms  = self.${ident}.fromPaths;
+          in builtins.foldl' ( acc: fp: acc.__installOne fp oldEnt ) installed
+                                                                     froms;
+        in if self ? ${ident}.fromPaths then reinstallChildren else
+           if ( fromPath != [] ) then pass else installed;
+        stubHere = let
+          stubbed = self.__update {
+            ${ident} = {
+              inherit version;
+              stub = true;
+              fromPaths = [fromPath];
+            };
+          };
+          pass = stubbed.__extend ( extendChild ent );
+        in if fromPath == [] then stubbed else pass;
+        installChild = self.__extend ( extendChild ent );
+        conflictMsg = let
+          nmFromPath = let
+            nmj = builtins.concatStringsSep "/node_modules/" fromPath;
+            end = if fromPath == [] then "" else "/node_modules/";
+          in "node_modules/${nmj}${end}";
+          et= "(${errTag}:__installOne):";
+        in ''
+          ${et} Unable to install conflicting versions of '${ident}@${version}'
+              fromPath: ${nmFromPath}
+              have:     ${gv self.__cscope.${ident}}
+        '';
+      in
+        if scopeHasExact && ( ! hereHasId )      then builtins.trace "stubHere:${self.__pkg.ident}"     stubHere     else
+        if scopeHasExact                         then builtins.trace "addFromPath:${self.__pkg.ident}"  addFromPath  else
+        if ( fromPath != [] ) && ( ! hereHasId ) then builtins.trace "installHere:xxx:${self.__pkg.ident}"  ( installHere.__installOne fromPath ent ) else
+        if ( fromPath == [] ) || ( ! hereHasId ) then builtins.trace "installHere:${self.__pkg.ident}"  installHere  else
+        if ( fromPath != [] )                    then builtins.trace "installChild:${self.__pkg.ident}" installChild else
+         throw conflictMsg;
       # Installs a package with more flexible arguments, if `metaSet' can be
       # found in dependedncies installation will run recursively.
       # If you are looking to "exhaustively install recursively" you likely want
@@ -60,41 +117,32 @@
       # NPM style install process is performed using BFS and an exhaustive
       # install on a large number of packages is, suffice to say:
       # "fucking heavy".
-      __install = self: fromPath: x:
+      __install = self: { justDeps ? true, dev ? false, fromPath ? [] } @ cfg: x:
         if builtins.isString x then y: if builtins.isString y then
           self.__installOne fromPath { ident = x; version = y; }
-        else self.__install fromPath ( { ident = x; } // y ) else let
+        else self.__install cfg ( { ident = x; } // y ) else let
           inherit (x) ident version;
           ent = { inherit (x) ident version; };
-          metaSet =
-            x.metaSet or x.__meta.metaSet or x.__pscope.__meta.metaSet or (
-              if x ? __pscope.__meta.setFromType then x.__pscope else
-              throw ( "(mkNodeModulesScope:__install:${x.ident}@${x.version}): "
-                      + " Cannot locate metaSet" ) );
           meta =
-            if ( x ? depInfo ) then x else if ( x ? meta ) then x.meta else
-            if ( metaSet ? "${ident}/${version}" )
-            then metaSet."${ident}/${version}" else
-              throw ( "(mkNodeModulesScope:__install:${ident}@${version}): " +
-                      "Cannot locate meta" );
-          rtDepPins =
-            meta.depInfo.runtimeDepPins or
-            metaSet."${ident}/${version}".depInfo.runtimeDepPins or {};
-          devDepPins =
-            meta.depInfo.devDepPins or
-            metaSet."${ident}/${version}".depInfo.devDepPins or {};
+            if ( x ? depInfo ) then x else
+            if ( x ? meta ) then x.meta else
+            self.__metaSet."${ident}/${version}" or
+              ( throw "(${errTag}:__install): Cannot locate meta" );
+          rtDepPins = meta.depInfo.runtimeDepPins or {};
+          devDepPins = meta.depInfo.devDepPins or {};
           depPins = rtDepPins // ( lib.optionalAttrs dev devDepPins );
           pinIVs = builtins.attrValues ( builtins.mapAttrs asIV depPins );
-          withX = self.__installOne fromPath ent;
+          withX = if justDeps then self else self.__installOne fromPath ent;
           withPins =
             builtins.foldl' ( acc: acc.__installOne fromPath ) withX pinIVs;
-          installRec = acc: y:
-            acc.__install ( fromPath ++ [y.ident] )
-                          ( { inherit metaSet; } // y );
+          installRec = acc: y: acc.__install {
+            justDeps = true;
+            fromPath = fromPath ++ [y.ident];
+          } y;
         in builtins.foldl' installRec withPins pinIVs;
     };
     scope = lib.libmeta.mkExtInfo' extra ( final: {
-      inherit __pkg;
+      inherit __pkg __metaSet;
       __version = version;
     } );
     withOv = let
@@ -108,30 +156,18 @@
 
 /* -------------------------------------------------------------------------- */
 
-  mkNodeModulesScopeFromMetaSet = ms: {
-    key                  ? ms.__meta.rootKey
-  , root                 ? ms.${key}
-  # This differs from the meaning in `mkNodeModulesScope' which treats
-  # `dev' "recursively".
-  # Here this means "install the dev deps for the root package".
+  mkNodeModulesScopeFromMetaSet = __metaSet: {
+    key                  ? __metaSet.__meta.rootKey
+  , root                 ? __metaSet.${key}
   , dev                  ? false
   , modulesScopeOverlays ? []
   #, useInstances        ? false # FIXME:
   } @ config: let
     # FIXME: XXX: `dev' shouldn't be passed here
-    base  = mkNodeModulesScope' { inherit dev modulesScopeOverlays; }
+    base  = mkNodeModulesScope' { inherit __metaSet modulesScopeOverlays; }
                                 { inherit (root) ident version; };
-  #  pinIVs = ident: version: { inherit ident version; metaSet = ms; };
-  #  withRt =
-  #    builtins.foldl' ( acc: acc.__install [] ) base
-  #      ( builtins.attrValues
-  #        ( builtins.mapAttrs pinIVs root.depInfo.runtimeDepPins ) );
-  #  withDev =
-  #    builtins.foldl' ( acc: acc.__install [] ) withRt
-  #      ( builtins.attrValues
-  #        ( builtins.mapAttrs pinIVs root.depInfo.runtimeDepPins ) );
-  #in if dev then withDev else withRt;
-  in base.__install [] { inherit (root) ident version; metaSet = ms; };
+  in base.__install { inherit dev; justDeps = true; }
+                    { inherit (root) ident version; };
 
 
 /* -------------------------------------------------------------------------- */
