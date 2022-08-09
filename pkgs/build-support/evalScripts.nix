@@ -70,6 +70,9 @@
       "nativeBuildInputs"  # We extend this
       "passthru"           # We extend this
     ];
+    # FIXME: The `.bin/' dirs probably point to executables in the Nix store,
+    # so if someone tries to patch them in a build hook it's not going to do
+    # what they expect.
     copyNm = ''
       find -L ${nodeModules}/ -type d -name '.bin' -prune -o -type d -print  \
         |sed "s,${nodeModules}/,$absSourceRoot/node_modules/,"               \
