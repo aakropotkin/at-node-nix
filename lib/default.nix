@@ -30,7 +30,11 @@
     ;
 
     inherit (final.libnm)
-      mkNodeModulesScope
+      mkNmEntry
+      mkNmEntryAttr
+      mkNodeModulesDir'
+      nmGetPath
+      nmAddPkg
     ;
 
     inherit (final.libpkginfo)

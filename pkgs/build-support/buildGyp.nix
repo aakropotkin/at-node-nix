@@ -53,6 +53,7 @@
   , buildFlags      ? []
   , skipMissing     ? true
   , dontLinkModules ? nodeModules == null
+  , copyNodeModules ? false
   , ignorePrePostScripts ? false
   , ...
   } @ attrs: let
@@ -65,6 +66,7 @@
       "nodeModules"
       "skipMissing"
       "dontLinkModules"
+      "copyNodeModules"
       "nativeBuildInputs"  # We extend this
       "passthru"           # We extend this
       "buildType"
@@ -77,6 +79,21 @@
     runOne = sn: let
       fallback = lib.optionalString skipMissing "// \":\"";
     in ''eval "$( jq -r '.scripts.${sn} ${fallback}' ./package.json; )"'';
+    copyNm = ''
+      find -L ${nodeModules}/ -type d -name '.bin' -prune -o -type d -print  \
+        |sed "s,${nodeModules}/,$absSourceRoot/node_modules/,"               \
+        |xargs mkdir -p
+      find -L ${nodeModules}/ -type f -path '*/.bin/*' -prune -o -type f -print         \
+        |sed "s,\(${nodeModules}\)/\(.*\),cp -- \1/\2 $absSourceRoot/node_modules/\2,"  \
+        |sh
+      find ${nodeModules}/ -type d -name '.bin' -print  \
+        |sed "s,\(${nodeModules}\)/\(.*\),cp -r -- \1/\2 $absSourceRoot/node_modules/\2,"  \
+        |sh
+      chmod -R u+rw "$absSourceRoot/node_modules"
+    '';
+    linkNm = ''
+      ln -s -- ${nodeModules} "$absSourceRoot/node_modules"
+    '';
   in stdenv.mkDerivation ( {
     inherit name version src;
     outputs = ["out" "build"];
@@ -91,11 +108,12 @@
       export absSourceRoot="$PWD/$sourceRoot"
       if ! test -d "$absSourceRoot"; then
         echo "absSourceRoot: $absSourceRoot does not exist" >&2
-        exit 1;
+        exit 1
       fi
     '' + ( lib.optionalString ( ! dontLinkModules ) ''
-      ln -s -- ${nodeModules} "$absSourceRoot/node_modules"
+      ${if copyNodeModules then copyNm else linkNm}
       export PATH="$PATH:$absSourceRoot/node_modules/.bin"
+      export NODE_PATH="$absSourceRoot/node_modules:''${NODE_PATH:+:$NODE_PATH}"
     '' );
     configurePhase = let
       runPreInst =

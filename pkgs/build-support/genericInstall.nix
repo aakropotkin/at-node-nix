@@ -33,8 +33,8 @@ let
   , impure      ? ga-impure  # See note at top
   # If you ACTUALLY want to avoid this you can explicitly set to `null' but
   # honestly I never seen a `postInstall' that didn't call `node'.
-  , nodejs ? globalAttrs.nodejs or ( throw "You must pass nodejs explicitly" )
-  , jq     ? globalAttrs.jq  or ( throw "You must pass jq explicitly" )
+  , nodejs   ? globalAttrs.nodejs or ( throw "You must pass nodejs explicitly" )
+  , jq       ? globalAttrs.jq  or ( throw "You must pass jq explicitly" )
   , stdenv   ? globalAttrs.stdenv
   , xcbuild  ? globalAttrs.xcbuild
   , node-gyp ? nodejs.pkgs.node-gyp

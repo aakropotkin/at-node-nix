@@ -44,6 +44,7 @@
   , version ? src.meta.version or null  # Just used for the name fallback
   , src
   , nodeModules
+  , copyNodeModules ? false
   # If you ACTUALLY want to avoid this you can explicitly set to `null' but
   # honestly I never seen a `postInstall' that didn't call `node'.
   , nodejs ? globalAttrs.nodejs or ( throw "You must pass nodejs explicitly" )
@@ -64,10 +65,26 @@
       "nodeModules"
       "skipMissing"
       "dontLinkModules"
+      "copyNodeModules"
       "runScripts"
       "nativeBuildInputs"  # We extend this
       "passthru"           # We extend this
     ];
+    copyNm = ''
+      find -L ${nodeModules}/ -type d -name '.bin' -prune -o -type d -print  \
+        |sed "s,${nodeModules}/,$absSourceRoot/node_modules/,"               \
+        |xargs mkdir -p
+      find -L ${nodeModules}/ -type f -path '*/.bin/*' -prune -o -type f -print         \
+        |sed "s,\(${nodeModules}\)/\(.*\),cp -- \1/\2 $absSourceRoot/node_modules/\2,"  \
+        |sh
+      find ${nodeModules}/ -type d -name '.bin' -print  \
+        |sed "s,\(${nodeModules}\)/\(.*\),cp -r -- \1/\2 $absSourceRoot/node_modules/\2,"  \
+        |sh
+      chmod -R u+rw "$absSourceRoot/node_modules"
+    '';
+    linkNm = ''
+      ln -s -- ${nodeModules} "$absSourceRoot/node_modules"
+    '';
   in stdenv.mkDerivation ( {
     nativeBuildInputs = ( attrs.nativeBuildInputs or [] ) ++ [jq] ++
                         ( lib.optional ( nodejs != null ) nodejs );
@@ -76,11 +93,12 @@
       export absSourceRoot="$PWD/$sourceRoot"
       if ! test -d "$absSourceRoot"; then
         echo "absSourceRoot: $absSourceRoot does not exist" >&2
-        exit 1;
+        exit 1
       fi
     '' + ( lib.optionalString ( ! dontLinkModules ) ''
-      ln -s -- ${nodeModules} "$absSourceRoot/node_modules"
+      ${if copyNodeModules then copyNm else linkNm}
       export PATH="$PATH:$absSourceRoot/node_modules/.bin"
+      export NODE_PATH="$absSourceRoot/node_modules:''${NODE_PATH:+:$NODE_PATH}"
     '' );
     buildPhase = let
       runOne = sn: let
