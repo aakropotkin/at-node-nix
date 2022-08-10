@@ -82,16 +82,17 @@
     # FIXME: The `.bin/' dirs probably point to executables in the Nix store,
     # so if someone tries to patch them in a build hook it's not going to do
     # what they expect.
+      #find -L ${nodeModules}/ -type d -name '.bin' -prune -o -type d -print  \
+      #  |sed "s,${nodeModules}/,$absSourceRoot/node_modules/,"               \
+      #  |xargs mkdir -p
+      #find -L ${nodeModules}/ -type f -path '*/.bin/*' -prune -o -type f -print         \
+      #  |sed "s,\(${nodeModules}\)/\(.*\),cp -- \1/\2 $absSourceRoot/node_modules/\2,"  \
+      #  |sh
+      #find ${nodeModules}/ -type d -name '.bin' -print  \
+      #  |sed "s,\(${nodeModules}\)/\(.*\),cp -r -- \1/\2 $absSourceRoot/node_modules/\2,"  \
+      #  |sh
     copyNm = ''
-      find -L ${nodeModules}/ -type d -name '.bin' -prune -o -type d -print  \
-        |sed "s,${nodeModules}/,$absSourceRoot/node_modules/,"               \
-        |xargs mkdir -p
-      find -L ${nodeModules}/ -type f -path '*/.bin/*' -prune -o -type f -print         \
-        |sed "s,\(${nodeModules}\)/\(.*\),cp -- \1/\2 $absSourceRoot/node_modules/\2,"  \
-        |sh
-      find ${nodeModules}/ -type d -name '.bin' -print  \
-        |sed "s,\(${nodeModules}\)/\(.*\),cp -r -- \1/\2 $absSourceRoot/node_modules/\2,"  \
-        |sh
+      cp -r --reflink=auto -- ${nodeModules} "$absSourceRoot/node_modules"
       chmod -R u+rw "$absSourceRoot/node_modules"
     '';
     linkNm = ''
