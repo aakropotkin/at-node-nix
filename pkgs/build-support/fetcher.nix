@@ -116,7 +116,11 @@ let
     # NOTE: You must leave the "<path>#<rev>" as is for the builtin fetchers -
     #       a "<path>/<rev>" will not work; but I think flake inputs DO want it
     #       replaced with a "/".
-    bfg = { url = "${protocol}://${host}/${owner}/${repo}#${rev}"; };
+    bfg = {
+      url = "${protocol}://${host}/${owner}/${repo}#${rev}";
+      inherit rev;
+      allRefs = true;
+    };
     bfr = bfg // { type = "git"; };
     prefetched = if ( ! impure ) then {} else fetchTree bfr;
     # You'll still need a SHA here, Nixpkgs won't use the `rev'.
@@ -225,8 +229,8 @@ let
       urlFetcher     = fa: fetchurl ( fa.nixpkgs.fetchurl or fa );
       tarballFetcher = fa: fetchurl ( fa.nixpkgs.fetchurl or fa );
       gitFetcher     = fa: fetchgit ( fa.nixpkgs.fetchgit or fa );
-      linkFetcher    = fa: builtins.path        ( fa.builtins.path    or fa );
-      dirFetcher     = fa: builtins.path        ( fa.builtins.path    or fa );
+      linkFetcher    = fa: builtins.path ( fa.builtins.path or fa );
+      dirFetcher     = fa: builtins.path ( fa.builtins.path or fa );
     };
   };
 
