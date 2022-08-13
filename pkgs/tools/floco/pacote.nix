@@ -1,9 +1,11 @@
-{ nixpkgs ? builtins.getFlake "nixpkgs"
-, system ? builtins.currentSystem
+{ runCommandNoCC ? pkgsFor.runCommandNoCC
 , pacote ? ( builtins.getFlake  (
                toString ../../../pkgs/development/node-packages/pacote
            ) ).packages.${system}.pacote
-, pkgs   ? nixpkgs.legacyPackages.${system}
+# For Fallback
+, nixpkgs ? builtins.getFlake "nixpkgs"
+, system  ? builtins.currentSystem
+, pkgsFor ? nixpkgs.legacyPackages.${system}
 }: let
 
   inherit (builtins) elem concatStringsSep;
@@ -36,7 +38,7 @@
 
     stdoutTo = if elem cmd ["tarball" "extract"] then "$manifest" else "$out";
 
-  in ( pkgs.runCommandNoCC name {
+  in ( runCommandNoCC name {
     # `tarball' and `extract' dump `{ integrity, resolved, from }' to `stdout'.
     # Capturing these in `$meta' is useful for now, but once we can reliably
     # predict the `resolved' and `from' fields it would write for a URI, we

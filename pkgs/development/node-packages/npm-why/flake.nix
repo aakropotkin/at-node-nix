@@ -10,7 +10,6 @@
     inherit (nodePackages) sources shell nodeDependencies;
     npm-why = nodePackages."npm-why";
     app = utils.lib.mkApp { drv = npm-why; };
-    overlays = final: prev: { inherit npm-why; };
   in {
     packages.npm-why = npm-why;
     packages.default = npm-why;
@@ -20,6 +19,18 @@
     defaultApp = app;
     nodeDependencies = nodeDependencies;
     nodeShell = shell;
-    inherit overlays;
-  } );
+  } ) // {
+    overlays = {
+      npm-why = final: prev: {
+        npm-why = let
+          nodePackages = final.callPackage ./default.nix {
+            # Will fail for Node.js v16 because of optional deps.
+            # Not hard to actually fix; but I don't see a need to.
+            nodejs = final.nodejs-14_x;
+          };
+        in nodePackages.npm-why;
+      };
+      default = self.overlays.npm-why;
+    };
+  };
 }

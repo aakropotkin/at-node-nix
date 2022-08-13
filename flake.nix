@@ -1,6 +1,4 @@
 {
-  inputs.nix.url = "github:NixOS/nix/master";
-  inputs.nix.inputs.nixpkgs.follows = "/nixpkgs";
   inputs.utils.url = "github:numtide/flake-utils/master";
   inputs.utils.inputs.nixpkgs.follows = "/nixpkgs";
   inputs.ak-nix.url = "github:aakropotkin/ak-nix/main";
@@ -8,7 +6,7 @@
   inputs.ak-nix.inputs.utils.follows = "/utils";
 
 
-  outputs = { self, nixpkgs, nix, utils, ak-nix }: let
+  outputs = { self, nixpkgs, utils, ak-nix }: let
     inherit (builtins) getFlake;
     inherit (utils.lib) eachDefaultSystemMap mkApp;
 
@@ -17,58 +15,74 @@
     lib = import ./lib { inherit (ak-nix) lib; };
 
     pacoteFlake = let
-      raw = import ./pkgs/development/node-packages/pacote/flake.nix;
-      lock = lib.importJSON ./pkgs/development/node-packages/pacote/flake.lock;
-      final = raw // ( raw.outputs {
-        inherit nixpkgs utils;
-        self = final;
-        pacote-src = builtins.fetchTree lock.nodes.pacote-src.locked;
-      } );
-    in final;
+      path = toString ./pkgs/development/node-packages/pacote;
+    in lib.callFlake path { inherit nixpkgs utils; };
+    npmWhyFlake = let
+      path = toString ./pkgs/development/node-packages/npm-why;
+    in lib.callFlakeWith path { inherit nixpkgs utils; };
 
-    pacotecli = system: ( import ./pkgs/tools/floco/pacote.nix {
+    _pacotecli = system: ( import ./pkgs/tools/floco/pacote.nix {
       inherit nixpkgs system;
       inherit (pacoteFlake.packages.${system}) pacote;
     } ).pacotecli;
 
   in {
 
+    # Exposes `lib' as a flake output.
     inherit lib;
 
+    overlays.default = self.overlays.at-node-nix;
     overlays.at-node-nix = final: prev: let
-      pkgsFor = import nixpkgs { inherit (final) system; overlays = [
-        ak-nix.overlays.default
-      ]; };
+      callPackage  = final.callPackage;
+      callPackages = final.callPackages;
+      pkgs = let
+        ov = lib.composeManyExtensions [
+          ak-nix.overlays.default
+          pacoteFlake.overlays.default
+        ];
+      in nixpkgs.legacyPackages.${prev.system}.extend ov;
+      _node-pkg-set = callPackages ./pkgs/node-pkg-set.nix {
+        fetcher = final.fetcher {
+          cwd = throw "Override `cwd' to use local fetchers";
+          preferBuiltins  = true;
+          preferFetchTree = true;
+          inherit (final.defaultFetchers.defaultBuiltins)
+            dirFetcher
+            linkFetcher
+          ;
+        };
+      };
     in {
-
-      lib = import ./lib { lib = pkgsFor.lib; };
-
-      pacotecli = pacotecli final.system;
-
-      npm-why = ( import ./pkgs/development/node-packages/npm-why {
-        pkgs = pkgsFor;
-      } ).npm-why;
-
-      linkModules = { modules ? [] }:
-        pkgsFor.callPackage ./pkgs/build-support/link-node-modules-dir.nix {
-          inherit (pkgsFor) runCommandNoCC;
-          lndir = pkgsFor.xorg.lndir;
-        } { inherit modules; };
-
-      buildGyp = import ./pkgs/build-support/buildGyp.nix {
-        inherit (final) lib;
-        inherit (pkgsFor) stdenv xcbuild jq nodejs;
-      };
-
-      evalScripts = import ./pkgs/build-support/evalScripts.nix {
-        inherit (final) lib;
-        inherit (pkgsFor) stdenv jq nodejs;
-      };
-
-      inherit ( import ./pkgs/build-support/mkNodeTarball.nix {
-        inherit (pkgsFor) linkFarm linkToPath untar tar;
-        inherit (final) lib pacotecli;
-      } )
+      lib = import ./lib { inherit (ak-nix) lib; };
+      # Set a fallback config, but prefer values from `prev'.
+      config = lib.recursiveUpdate {
+        flocoConfig = {
+          registryScopes._default = "https://registry.npmjs.org";
+          enableImpureMeta        = builtins ? currentTime;
+          enableImpureFetchers    = builtins ? currentTime;
+          metaEntOverlays         = [];
+          metaSetOverlays         = [];
+          pkgEntOverlays          = [];
+          pkgSetOverlays          = [];
+        };
+      } ( prev.config or {} );
+      inherit (prev.xorg) lndir;
+      inherit (pkgs) pacote copyOut linkToPath untar tar untarSanPerms;
+      inherit (callPackages ./pkgs/tools/floco/pacote.nix {})
+        pacotecli
+        pacote-manifest
+      ;
+      # The following attrs are all functions that require more args.
+      # Don't let the `callPackage' deceive you here, these are just autopassing
+      # args to functions which may or may not actually return derivations yet.
+      snapDerivation = callPackage ./pkgs/make-derivation-simple.nix {};
+      linkModules = # { modules ? [] }: ...
+        callPackage ./pkgs/build-support/link-node-modules-dir.nix {};
+      buildGyp       = callPackage ./pkgs/build-support/buildGyp.nix {};
+      evalScripts    = callPackage ./pkgs/build-support/evalScripts.nix {};
+      genericInstall = callPackage ./pkgs/build-support/genericInstall.nix {};
+      runBuild       = callPackage ./pkgs/build-support/runBuild.nix {};
+      inherit (callPackages ./pkgs/build-support/mkNodeTarball.nix {})
         packNodeTarballAsIs
         unpackNodeTarball
         linkAsNodeModule'
@@ -77,36 +91,9 @@
         linkAsGlobal
         mkNodeTarball
       ;
-
-      _node-pkg-set = import ./pkgs/node-pkg-set.nix {
-        inherit (final) lib evalScripts buildGyp nodejs linkModules;
-        inherit (final) runBuild genericInstall packNodeTarballAsIs;
-        inherit (pkgsFor) stdenv jq xcbuild linkFarm untarSanPerms copyOut;
-        fetcher = final._fetcher.fetcher {
-          cwd = throw "Override `cwd' to use local fetchers";  # defer to call-site
-          preferBuiltins  = true;
-          preferFetchTree = true;
-          inherit (final._fetcher.defaultFetchers.defaultBuiltins)
-            dirFetcher
-            linkFetcher
-          ;
-        };
-      };
-
-      genericInstall = import ./pkgs/build-support/genericInstall.nix {
-        inherit (final) lib buildGyp evalScripts nodejs;
-        inherit (pkgsFor) stdenv jq xcbuild;
-      };
-
-      runBuild = import ./pkgs/build-support/runBuild.nix {
-        inherit (final) lib evalScripts nodejs;
-        inherit (pkgsFor) stdenv jq;
-      };
-
-      inherit ( import ./pkgs/build-support/fetcher.nix {
-        inherit (final) lib;
-        inherit (pkgsFor) fetchurl fetchgit fetchzip;
-      } )
+      inherit (callPackages ./pkgs/build-support/fetcher.nix {
+        impure = final.config.flocoConfig.enableImpureFetchers;
+      })
         plock2TbFetchArgs
         plock2GitFetchArgs
         plock2LinkFetchArgs
@@ -116,29 +103,13 @@
         getPreferredFetchers
         fetcher
       ;
-
-      yml2json = import ./pkgs/build-support/yml-to-json.nix {
-        inherit (pkgsFor) yq runCommandNoCC;
-      };
-
-      yarnLock = import ./pkgs/build-support/yarn-lock.nix {
-        inherit (pkgsFor) fetchurl yarn writeText;
-        inherit (final) lib yml2json;
-      };
-
-      genFlakeInputs = import ./pkgs/tools/floco/generate-flake-inputs.nix {
-        inherit (pkgsFor) writeText;
-        inherit (final) lib;
-        enableTraces = false;
-      };
-
-      snapDerivation = import ./pkgs/make-derivation-simple.nix {
-        inherit (pkgsFor) bash coreutils;
-        inherit (final.stdenv) system;
-      };
-
-      # FIXME: Cherry pick `_node-pkg-set' imports later.
-    } // final._node-pkg-set;
+      yml2json = callPackage ./pkgs/build-support/yml-to-json.nix {};
+      yarnLock = callPackage ./pkgs/build-support/yarn-lock.nix {};
+      genFlakeInputs =
+        callPackage ./pkgs/tools/floco/generate-flake-inputs.nix {
+          enableTraces = false;
+        };
+    };
 
 
 /* -------------------------------------------------------------------------- */
@@ -148,7 +119,7 @@
         inherit lib;
         inherit (nixpkgs.legacyPackages.${system}) linkFarm;
         inherit (ak-nix.trivial.${system}) linkToPath untar tar;
-        pacotecli = pacotecli system;
+        pacotecli = _pacotecli system;
       };
 
       _fetcher = import ./pkgs/build-support/fetcher.nix {
@@ -220,7 +191,7 @@
 
     in {
 
-      pacotecli = pacotecli system;
+      pacotecli = _pacotecli system;
       inherit
         linkModules
         snapDerivation
