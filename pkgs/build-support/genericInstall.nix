@@ -103,7 +103,7 @@ let
       base = if hasGypfile then gyp else std;
       pmeta = base.meta or meta;
       meta' = if gypfileKnownPure || ( ! impure ) then pmeta else {
-        meta = lib.updateAttrsE pmeta {
+        meta = meta // {
           gypfile = detectGypfile;
           __impureFields = ( pmeta._impureFields or [] ) ++ ["gypfile"];
         };

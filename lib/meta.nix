@@ -195,6 +195,8 @@
     self = ( infoR self ) // {
       __update   = info': self.__new ( self // info' );
       __add      = info': self.__new ( info' // self );
+      # Inject an operation "in front of" another.
+      # For example: __extend g() f( x ) --> f( g( x ) )
       __extend   = ov: self.__new ( lib.fixedPoints.extends ov self.__unfix__ );
       __serial   = __serial self;
       __entries  = __entries self;
@@ -290,7 +292,9 @@
         prepared  = "${final.names.bname}-prep-${prev.version}";
         bin       = "${final.names.bname}-bin-${prev.version}";
         module    = "${final.names.bname}-module-${prev.version}";
+        test      = "${final.names.bname}-test-${prev.version}";
         global    = "${final.names.bname}-${prev.version}";
+        genName   = name: "${final.names.bname}-${name}-${prev.version}";
       } // ( if final.scoped then { scope = lib.yank "@([^/]+)/.*" prev.ident; }
                              else {} );
     };

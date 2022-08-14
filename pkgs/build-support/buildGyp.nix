@@ -55,8 +55,15 @@
   , dontLinkModules ? nodeModules == null
   , copyNodeModules ? false
   , ignorePrePostScripts ? false
+
+  , prepareOutput ? true
+  , withModule    ? withPrepared
+  , withGlobal    ? withPrepared
+  , hasBin        ? meta.hasBin or false
+  , binPermsSet   ? meta.binPermsSet or false
   , ...
-  } @ attrs: let
+  } @ attrs: assert withModule -> prepareOutput;
+             assert withGlobal -> prepareOutput; let
     mkDrvAttrs = removeAttrs attrs [
       "ident"
       "nodejs"
@@ -74,6 +81,11 @@
       "configureFlags"
       "buildFlags"
       "ignorePrePostScripts"
+      "prepareOutput"
+      "withModule"
+      "withGlobal"
+      "hasBin"
+      "binPermsSet"
     ];
     sf = builtins.concatStringsSep " ";
     runOne = sn: let
@@ -100,7 +112,11 @@
     '';
   in stdenv.mkDerivation ( {
     inherit name version src;
-    outputs = ["out" "build"];
+    outputs = [
+      "out"
+      "build"
+    ] ++ ( lib.optional withModule "module" )
+      ++ ( lib.optional withGlobal "global" );
     nativeBuildInputs = ( attrs.nativeBuildInputs or [] ) ++ [
       nodejs
       node-gyp
@@ -148,12 +164,71 @@
       ${defaultGypInst}
       ${runPostInst}
     '';
-    installPhase = lib.withHooks "install" ''
+    installPhase = let
+      binPermsHook =
+        lib.optionalString ( meta ? bin )
+                           ( genSetBinPermissionsHook { inherit meta; } );
+      moduleHook = let
+        base = ''
+          mkdir -p "$module/${meta.ident}";
+          cp -pr --reflink=auto -- "$out" "$module/${meta.ident}"
+        '';
+        bin = let
+          forDir = ''
+            ln -sr -- "$module/${meta.ident}/${meta.bin.__DIR__}"/*  \
+                      "$module/.bin/"
+          '';
+          forAttrs = let
+            linkOne = bname: from: ''
+              ln -sr -- "$module/${meta.ident}/${from}" "$module/.bin/${bname}"
+            '';
+          in builtins.concatStringsSep "" ( map linkOne meta.bin );
+        in lib.optionalString hasBin ''
+          mkdir -p "$module/.bin"
+        '' + ( if meta.bin ? __DIR__ then forDir else forAttrs );
+      in lib.optionalString withModule ( base + bin );
+      globalHook = let
+        base = ''
+          mkdir -p "$global/lib/node_modules/${meta.key}"
+          cp -pr --reflink=auto -- "$out" "$global/lib/node_modules/${meta.key}"
+        '';
+        nm = let
+          copy = ''
+            cp -pr --reflink=auto --                               \
+              "${nodeModules}"                                     \
+              "$global/lib/node_modules/${meta.key}/node_modules"
+          '';
+          link = ''
+            ln -s -- "${nodeModules}"                                     \
+                     "$global/lib/node_modules/${meta.key}/node_modules"
+          '';
+        in lib.optionalString ( nodeModules != null )
+                              ( if copyNodeModules then copy else link );
+        bin = let
+          forDir = ''
+            ln -sr --                                                       \
+              "$global/lib/node_modules/${meta.key}/${meta.bin.__DIR__}"/*  \
+              "$global/bin/"
+          '';
+          forAttrs = let
+            linkOne = bname: from: ''
+              ln -sr -- "$global/lib/node_modules/${meta.key}/${from}"  \
+                        "$global/bin/${bname}"
+            '';
+          in builtins.concatStringsSep "" ( map linkOne meta.bin );
+        in lib.optionalString hasBin ''
+          mkdir -p "$module/.bin"
+        '' + ( if meta.bin ? __DIR__ then forDir else forAttrs );
+      in lib.optionalString withModule ( base + bin );
+    in lib.withHooks "install" ''
       mkdir -p "$build"
       cp -pr --reflink=auto -- ./build "$build"
       rm -f -- ./node_modules
       cd "$NIX_BUILD_TOP"
       mv -- "$absSourceRoot" "$out"
+      ${binPermsHook}
+      ${moduleHook}
+      ${globalHook}
     '';
     passthru = { inherit src nodejs nodeModules; };
   } // mkDrvAttrs );
