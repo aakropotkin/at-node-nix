@@ -85,7 +85,7 @@ let
       buildPhase = lib.withHooks "build" ''
         ${runOne "preinstall"}
         if test -n "$isGyp"; then
-          eval "$( jq -r '.scripts.install // \"node-gyp\"' ./package.json; )"
+          eval "$( jq -r '.scripts.install // "node-gyp"' ./package.json; )"
         else
           ${runOne "install"}
         fi
