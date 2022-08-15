@@ -151,7 +151,7 @@
     installPhase = lib.withHooks "install" ''
       mkdir -p "$build"
       cp -pr --reflink=auto -- ./build "$build"
-      rm -f -- ./node_modules
+      rm -rf -- ./node_modules
       cd "$NIX_BUILD_TOP"
       mv -- "$absSourceRoot" "$out"
     '';
