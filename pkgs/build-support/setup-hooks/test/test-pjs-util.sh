@@ -117,6 +117,14 @@ test_pjsBinPairs() {
   return 0;
 }
 
+test_pjsBinPaths() {
+  test "$( pjsBinPairs "$EX1"; )" = "bin/bar.js";
+  test "$( pjsBinPairs "$EX2"; )" = "bin/bar.sh";
+  test "$( pjsBinPairs "$EX3"; )" =                                      \
+       "$( printf '%s\n' 'scripts/foo.js' 'scripts/bar.js'; )";
+  return 0;
+}
+
 
 # --------------------------------------------------------------------------- #
 
@@ -128,7 +136,9 @@ runTest test_pjsHasBin;
 runTest test_pjsHasBinString;
 runTest test_pjsHasBindir;
 runTest test_pjsHasAnyBin;
+
 runTest test_pjsBinPairs;
+runTest test_pjsBinPaths;
 
 
 # --------------------------------------------------------------------------- #

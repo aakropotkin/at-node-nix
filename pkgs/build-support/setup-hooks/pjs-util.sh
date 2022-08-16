@@ -14,6 +14,7 @@
 : "${CHMOD:=chmod}";
 : "${SED:=sed}";
 : "${BASH:=bash}";
+
 : "${skipMissing:=1}";
 : "${scriptFallback:=:}";
 
@@ -87,6 +88,29 @@ pjsBinPairs() {
     $FIND "$pdir/$bdir" -maxdepth 1 -type f -printf "%f $bdir/%f\n"  \
       |$SED 's/\([^.]\+\)\(\.[^ ]\+\) /\1 /';
   fi
+}
+
+pjsBinPaths() {
+  local pdir bdir;
+  if pjsHasBin "$1"; then
+    if pjsHasBinString "$1"; then
+      $JQ -r '.bin' "${1:-package.json}";
+    else
+      $JQ -r '.bin|keys' "${1:-package.json}";
+    fi
+  elif pjsHasBindir "$1"; then
+    pdir="${1:+${1%/*}}";
+    pdir="${pdir:=.}";
+    bdir="$( $JQ -r '.directories.bin' "${1:-package.json}"; )";
+    $FIND "$pdir/$bdir" -maxdepth 1 -type f -print;
+  fi
+}
+
+
+# --------------------------------------------------------------------------- #
+
+setBinPerms() {
+  $CHMOD +x -- $( pjsBinPaths "$1"; );
 }
 
 
