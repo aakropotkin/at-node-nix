@@ -1,7 +1,9 @@
 # =========================================================================== #
-
+# -*- mode: sh; sh-shell: bash; -*-
+# --------------------------------------------------------------------------- #
+#
 # Expects `jq', `coreutils', and `findutils' to be in path.
-
+#
 # --------------------------------------------------------------------------- #
 
 : "${JQ:=jq}";
@@ -11,14 +13,16 @@
 : "${MKDIR:=mkdir}";
 : "${CHMOD:=chmod}";
 : "${SED:=sed}";
+: "${SHELL:=sh}";
+: "${skipMissing:=1}";
 : "${scriptFallback:=:}";
 
 
 # --------------------------------------------------------------------------- #
 
 pjsBasename() {
-  $JQ -Rr 'capture( "(?<scope>[^/]+/)(?<bname>[^/]+)" )|.bname'  \
-      "${2:-package.json}";
+  $JQ -r '.name|capture( "(?<scope>[^/]+/)?(?<bname>[^/]+)" )|.bname'  \
+      "${1:-package.json}";
 }
 
 
@@ -31,12 +35,14 @@ pjsHasScript() {
 
 pjsRunScript() {
   if test "$skipMissing" -eq 1; then
-    eval "$(
-      $JQ -r --arg sn "$1" --arg fb "$scriptFallback"     \
-          '.scripts[\$sn] // \$fb' "${2:-package.json}";
+    $SHELL -c "$(
+      $JQ -r --arg sn "$1" --arg fb "$scriptFallback"   \
+          '.scripts[$sn] // $fb' "${2:-package.json}";
     )";
   else
-    eval "$( $JQ -r --arg sn "$1" '.scripts[\$sn]' "${2:-package.json}"; )";
+    $SHELL -c "$(
+      $JQ -r --arg sn "$1" '.scripts[$sn]' "${2:-package.json}";
+    )";
   fi
 }
 
@@ -72,7 +78,7 @@ pjsBinPairs() {
       echo "$bname $script";
     else
       $JQ -r '.bin|to_entries|map( .key + " " + .value )[]'  \
-	  "${2:-package.json}";
+          "${2:-package.json}";
     fi
   elif pjsHasBindir; then
     bdir="$( $JQ -r '.directories.bin' "${2:-package.json}"; )";
