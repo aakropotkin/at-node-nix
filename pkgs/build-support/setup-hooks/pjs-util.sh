@@ -109,7 +109,7 @@ pjsBinPaths() {
 
 # --------------------------------------------------------------------------- #
 
-setBinPerms() {
+pjsSetBinPerms() {
   $CHMOD +x -- $( pjsBinPaths "$1"; );
 }
 
