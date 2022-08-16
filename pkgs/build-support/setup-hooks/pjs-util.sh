@@ -14,6 +14,7 @@
 : "${CHMOD:=chmod}";
 : "${SED:=sed}";
 : "${BASH:=bash}";
+: "${PATCH_SHEBANGS:=patchShebangs}";
 
 : "${skipMissing:=1}";
 : "${scriptFallback:=:}";
@@ -111,6 +112,14 @@ pjsBinPaths() {
 
 pjsSetBinPerms() {
   $CHMOD +x -- $( pjsBinPaths "$1"; );
+}
+
+
+# --------------------------------------------------------------------------- #
+
+pjsPatchShebangs() {
+  test "${dontPatchShebangs:-0}" -ne 1 && return 0;
+  $PATCH_SHEBANGS $( pjsBinPaths "$1"; );
 }
 
 
