@@ -460,7 +460,14 @@
       postTar = genSetBinPermissionsHook { inherit meta; };
       extraAttrs.meta.binPermsSet = true;
     };
-  in untarSanPerms ( { inherit tarball name; } // addBinPerms );
+  in untarSanPerms ( {
+    inherit tarball name;
+    tarFlags = [
+      # We don't want `--no-same-permissions' because it wipes out
+      # executable bits.
+      "--no-same-owner" "--delay-directory-restore" "--no-overwrite-dir"
+    ];
+  } // addBinPerms );
 
   extendEntUseSafeUnpack = ent: ent.__extend ( final: prev: let
     isTb = ( prev.meta.entrySubtype == "registry-tarball" ) ||
