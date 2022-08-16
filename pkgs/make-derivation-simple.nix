@@ -44,13 +44,21 @@
     inherit system;
     builder = shell;
     PATH = path;
-    args = [
+    args = let
+      fromBuildCommand =
+        if ( args ? passAsFile ) &&
+           ( builtins.elem "buildCommand" args.passAsFile ) then ''
+           . "$buildCommandPath"
+        '' else ''
+          eval "$buildCommand"
+        '';
+    in [
       "-e"
       ( args.builder or ( builtins.toFile "builder-${args.name}.sh" ''
           if test -e ".attrs.sh"; then
             source .attrs.sh;
           fi
-          eval "$buildCommand";
+          ${fromBuildCommand}
         '' ) )
     ];
   } // caArgs
