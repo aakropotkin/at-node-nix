@@ -48,7 +48,7 @@
       fromBuildCommand =
         if ( args ? passAsFile ) &&
            ( builtins.elem "buildCommand" args.passAsFile ) then ''
-           . "$buildCommandPath"
+          source "$buildCommandPath"
         '' else ''
           eval "$buildCommand"
         '';
