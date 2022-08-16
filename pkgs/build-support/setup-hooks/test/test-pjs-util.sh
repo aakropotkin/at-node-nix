@@ -3,13 +3,12 @@
 # -*- mode: sh; sh-shell: bash; -*-
 # --------------------------------------------------------------------------- #
 #
-# Expects `jq', `coreutils', and `findutils' to be in path.
+# Expects `bash', `jq', `sed', `coreutils', and `findutils' to be in path.
 #
 # --------------------------------------------------------------------------- #
 
 set -u;
 
-export SHELL=bash;
 source "${BASH_SOURCE[0]%/*}/../pjs-util.sh";
 
 EX1D="${BASH_SOURCE[0]%/*}/ex1";
@@ -19,16 +18,17 @@ EX2="$EX2D/package.json";
 EX3D="${BASH_SOURCE[0]%/*}/ex3";
 EX3="$EX3D/package.json";
 
+
 # --------------------------------------------------------------------------- #
 
 es=0;
 
 runTest() {
   if eval "$1"; then
-    echo "PASS: $1" >&2;
+    echo "PASS: (pjs-util.sh) $1" >&2;
     return 0;
   else
-    echo "FAIL: $1" >&2;
+    echo "FAIL: (pjs-util.sh) $1" >&2;
     set -x;
     eval "$1" >&2;
     set +x;
@@ -44,6 +44,7 @@ test_pjsBasename() {
   test "$( pjsBasename "$EX1"; )" = "ex1";
   test "$( pjsBasename "$EX2"; )" = "ex2";
   test "$( pjsBasename "$EX3"; )" = "ex3";
+  return 0;
 }
 
 
@@ -74,8 +75,47 @@ test_pjsRunScript() {
   if skipMissing=0 pjsRunScript "install" "$EX2" 2>/dev/null; then
     return 1;
   fi
+  return 0;
 }
 
+
+# --------------------------------------------------------------------------- #
+
+test_pjsHasBin() {
+  pjsHasBin "$EX1";
+  pjsHasBin "$EX2";
+  { pjsHasBin "$EX3"; } && return 1;
+  return 0;
+}
+
+test_pjsHasBinString() {
+  { pjsHasBinString "$EX1"; } && return 1;
+  pjsHasBinString "$EX2";
+  { pjsHasBinString "$EX3"; } && return 1;
+  return 0;
+}
+
+test_pjsHasBindir() {
+  { pjsHasBindir "$EX1"; } && return 1;
+  { pjsHasBindir "$EX2"; } && return 1;
+  pjsHasBindir "$EX3";
+  return 0;
+}
+
+test_pjsHasAnyBin() {
+  pjsHasAnyBin "$EX1";
+  pjsHasAnyBin "$EX2";
+  pjsHasAnyBin "$EX3";
+  return 0;
+}
+
+test_pjsBinPairs() {
+  test "$( pjsBinPairs "$EX1"; )" = "foo bin/bar.js";
+  test "$( pjsBinPairs "$EX2"; )" = "ex2 bin/bar.sh";
+  test "$( pjsBinPairs "$EX3"; )" =                                      \
+       "$( printf '%s\n' 'foo scripts/foo.js' 'bar scripts/bar.js'; )";
+  return 0;
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -84,6 +124,20 @@ runTest test_pjsBasename;
 runTest test_pjsHasScript;
 runTest test_pjsRunScript;
 
+runTest test_pjsHasBin;
+runTest test_pjsHasBinString;
+runTest test_pjsHasBindir;
+runTest test_pjsHasAnyBin;
+runTest test_pjsBinPairs;
+
+
+# --------------------------------------------------------------------------- #
+
+if test "$es" -eq 0; then
+  echo "PASS: pjs-util.sh" >&2;
+else
+  echo "FAIL: pjs-util.sh" >&2;
+fi
 exit "$es";
 
 

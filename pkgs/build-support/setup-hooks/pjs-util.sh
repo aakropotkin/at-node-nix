@@ -2,7 +2,7 @@
 # -*- mode: sh; sh-shell: bash; -*-
 # --------------------------------------------------------------------------- #
 #
-# Expects `jq', `coreutils', and `findutils' to be in path.
+# Expects `bash', `jq', `sed', `coreutils', and `findutils' to be in path.
 #
 # --------------------------------------------------------------------------- #
 
@@ -13,7 +13,7 @@
 : "${MKDIR:=mkdir}";
 : "${CHMOD:=chmod}";
 : "${SED:=sed}";
-: "${SHELL:=sh}";
+: "${BASH:=bash}";
 : "${skipMissing:=1}";
 : "${scriptFallback:=:}";
 
@@ -35,12 +35,12 @@ pjsHasScript() {
 
 pjsRunScript() {
   if test "$skipMissing" -eq 1; then
-    $SHELL -c "$(
+    $BASH -c "$(
       $JQ -r --arg sn "$1" --arg fb "$scriptFallback"   \
           '.scripts[$sn] // $fb' "${2:-package.json}";
     )";
   else
-    $SHELL -c "$(
+    $BASH -c "$(
       $JQ -r --arg sn "$1" '.scripts[$sn]' "${2:-package.json}";
     )";
   fi
@@ -50,39 +50,41 @@ pjsRunScript() {
 # --------------------------------------------------------------------------- #
 
 pjsHasBin() {
-  $JQ -e 'has( "bin" )' "${2:-package.json}" >/dev/null;
+  $JQ -e 'has( "bin" )' "${1:-package.json}" >/dev/null;
 }
 
 pjsHasBinString() {
   $JQ -e 'has( "bin" ) and ( ( .bin|type ) == "string" )'  \
-      "${2:-package.json}" >/dev/null;
+      "${1:-package.json}" >/dev/null;
 }
 
 pjsHasBindir() {
-  $JQ -e 'has( "directories" ) and ( .directories|has( "bin" )'  \
-      "${2:-package.json}" >/dev/null;
+  $JQ -e 'has( "directories" ) and ( .directories|has( "bin" ) )'  \
+      "${1:-package.json}" >/dev/null;
 }
 
 pjsHasAnyBin() {
   $JQ -e 'has( "bin" ) or ( has( "directories" ) and
-          ( .directories|has( "bin" ) )'  \
-      "${2:-package.json}" >/dev/null;
+          ( .directories|has( "bin" ) ) )'  \
+      "${1:-package.json}" >/dev/null;
 }
 
 pjsBinPairs() {
-  local bdir script bname;
-  if pjsHasBin; then
-    if pjsHasBinString; then
-      script="$( $JQ -r '.bin' "${2:-package.json}"; )";
-      bname="$( pjsBasename ${2:-}; )";
+  local pdir bdir script bname;
+  if pjsHasBin "$1"; then
+    if pjsHasBinString "$1"; then
+      script="$( $JQ -r '.bin' "${1:-package.json}"; )";
+      bname="$( pjsBasename ${1:-}; )";
       echo "$bname $script";
     else
       $JQ -r '.bin|to_entries|map( .key + " " + .value )[]'  \
-          "${2:-package.json}";
+          "${1:-package.json}";
     fi
-  elif pjsHasBindir; then
-    bdir="$( $JQ -r '.directories.bin' "${2:-package.json}"; )";
-    $FIND "${2:-.}/$bdir" -maxdepth 1 -type f "%f $bdir/%f\n"  \
+  elif pjsHasBindir "$1"; then
+    pdir="${1:+${1%/*}}";
+    pdir="${pdir:=.}";
+    bdir="$( $JQ -r '.directories.bin' "${1:-package.json}"; )";
+    $FIND "$pdir/$bdir" -maxdepth 1 -type f -printf "%f $bdir/%f\n"  \
       |$SED 's/\([^.]\+\)\(\.[^ ]\+\) /\1 /';
   fi
 }
