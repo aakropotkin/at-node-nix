@@ -44,6 +44,8 @@
     copyOut
   ;
 
+  patch-shebangs = pkgs.callPackage ./build-support/patch-shebangs.nix {};
+
   pacote =
     ( import ./development/node-packages/pacote { inherit pkgs; } ).package;
 
@@ -125,6 +127,7 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
     runInstallScripts
     genericInstall
     runBuild
+    patch-shebangs
   ;
   inherit (trivial)
     runLn

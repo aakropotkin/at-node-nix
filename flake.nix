@@ -82,6 +82,7 @@
       evalScripts    = callPackage ./pkgs/build-support/evalScripts.nix {};
       genericInstall = callPackage ./pkgs/build-support/genericInstall.nix {};
       runBuild       = callPackage ./pkgs/build-support/runBuild.nix {};
+      patch-shebangs = callPackage ./pkgs/build-support/patch-shebangs.nix {};
       inherit (callPackages ./pkgs/build-support/mkNodeTarball.nix {})
         packNodeTarballAsIs
         unpackNodeTarball
@@ -188,6 +189,9 @@
         inherit (nixpkgs.legacyPackages.${system}) stdenv jq;
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
       };
+
+      patch-shebangs = nixpkgs.legacyPackages.${system}.callPackage
+                         ./pkgs/build-support/patch-shebangs.nix {};
 
     in {
 
