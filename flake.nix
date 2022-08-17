@@ -190,10 +190,10 @@
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
       };
 
+    in {
+
       patch-shebangs = nixpkgs.legacyPackages.${system}.callPackage
                          ./pkgs/build-support/patch-shebangs.nix {};
-
-    in {
 
       pacotecli = _pacotecli system;
       inherit
