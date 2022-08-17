@@ -183,7 +183,7 @@
       # FIXME: this interface for handling `nodejs' input is hideous
       genericInstall = import ./pkgs/build-support/genericInstall.nix {
         inherit lib buildGyp evalScripts;
-        inherit (nixpkgs.legacyPackages.${system}) stdenv jq xcbuild;
+        inherit (nixpkgs.legacyPackages.${system}) stdenv jq xcbuild pkg-config;
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
         inherit (nixpkgs.legacyPackages.${system}.xorg) lndir;
       };
