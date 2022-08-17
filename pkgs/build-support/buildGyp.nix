@@ -94,7 +94,7 @@
       lndir -silent -ignorelinks ${nodeModules} "$node_modules_path"
     '';
     cloneNm = ''
-      source "$cloneNodeModulesPath"
+      source "$nmBuildCmdPath"
     '';
     isMkNmDir = nodeModules ? passthru.nmBuildCmd;
     nmCmd = if dontLinkModules then null else
