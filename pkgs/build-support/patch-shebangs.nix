@@ -1,6 +1,6 @@
-{ writeText, coreutils, findutils, gnused, bash }: writeText {
+{ writeTextFile, coreutils, findutils, gnused, bash }: writeTextFile {
   name = "patch-shebangs.sh";
-  executbale = true;
+  executable = true;
   destination = "/bin/patch-shebangs";
   text = ''
 #! ${bash}/bin/bash
