@@ -3,6 +3,7 @@
 , stdenv
 , xcbuild /* for darwin */
 , pkg-config
+, lndir
 # NOTE: You aren't required to pass these, but they serve as fallbacks.
 # I have commented them out to prevent accidental variable shadowing; but it is
 # recommended that you pass them.
@@ -78,32 +79,20 @@
       "configureFlags"
       "buildFlags"
       "ignorePrePostScripts"
+      "pkg-config"
+      "lndir"
     ];
     sf = builtins.concatStringsSep " ";
     runOne = sn: let
       fallback = lib.optionalString skipMissing "// \":\"";
     in ''eval "$( jq -r '.scripts.${sn} ${fallback}' ./package.json; )"'';
-    # FIXME: The `.bin/' dirs probably point to executables in the Nix store,
-    # so if someone tries to patch them in a build hook it's not going to do
-    # what they expect.
-      #find -L ${nodeModules}/ -type d -name '.bin' -prune -o -type d -print  \
-      #  |sed "s,${nodeModules}/,$absSourceRoot/node_modules/,"               \
-      #  |xargs mkdir -p
-      #find -L ${nodeModules}/ -type f -path '*/.bin/*' -prune -o -type f -print         \
-      #  |sed "s,\(${nodeModules}\)/\(.*\),cp -- \1/\2 $absSourceRoot/node_modules/\2,"  \
-      #  |sh
-      #find ${nodeModules}/ -type d -name '.bin' -print  \
-      #  |sed "s,\(${nodeModules}\)/\(.*\),cp -r -- \1/\2 $absSourceRoot/node_modules/\2,"  \
-      #  |sh
     copyNm = ''
-      cp -r --reflink=auto -- ${nodeModules} "$absSourceRoot/node_modules"
-      chmod -R u+rw "$absSourceRoot/node_modules"
+      cp -r --reflink=auto -- ${nodeModules} "$node_modules_path"
     '';
     linkNm = ''
-      mkdir -p "$absSourceRoot/node_modules"
-      ${lndir}/bin/lndir -silent -ignorelinks ${nodeModules} "$absSourceRoot/node_modules"
+      mkdir -p "$node_modules_path"
+      lndir -silent -ignorelinks ${nodeModules} "$node_modules_path"
     '';
-      #ln -s -- ${nodeModules} "$absSourceRoot/node_modules"
   in stdenv.mkDerivation ( {
     inherit name version src;
     outputs = ["out" "build"];
@@ -114,6 +103,7 @@
     nativeBuildInputs = ( attrs.nativeBuildInputs or [] ) ++ [
       python
       jq
+      lndir
     ] ++ ( lib.optional stdenv.isDarwin xcbuild )
       ++ ( lib.optional stdenv.isLinux pkg-config );
     # FIXME: handle bundled deps properly
@@ -124,9 +114,15 @@
         exit 1
       fi
     '' + ( lib.optionalString ( ! dontLinkModules ) ''
-      ${if copyNodeModules then copyNm else linkNm}
-      export PATH="$PATH:$absSourceRoot/node_modules/.bin"
-      export NODE_PATH="$absSourceRoot/node_modules:''${NODE_PATH:+:$NODE_PATH}"
+      export node_modules_path="$absSourceRoot/node_modules"
+
+      ${nodeModules.buildCommand or ( if copyNodeModules then copyNm else linkNm )}
+      if test -d "$node_modules_path"; then
+        chmod -R +rw "$node_modules_path"
+      fi
+
+      export PATH="$PATH:$node_modules_path/.bin"
+      export NODE_PATH="$node_modules_path''${NODE_PATH:+:$NODE_PATH}"
     '' );
     configurePhase = let
       runPreInst =
@@ -160,7 +156,7 @@
     installPhase = lib.withHooks "install" ''
       mkdir -p "$build"
       cp -pr --reflink=auto -- ./build "$build"
-      rm -rf -- ./node_modules
+      rm -rf -- "$node_modules_path"
       cd "$NIX_BUILD_TOP"
       mv -- "$absSourceRoot" "$out"
     '';
