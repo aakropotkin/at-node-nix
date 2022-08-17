@@ -90,7 +90,7 @@
     '';
     linkNm = ''
       mkdir -p "$absSourceRoot/node_modules"
-      ${lndir}/bin/lndir -silent ${nodeModules} "$absSourceRoot/node_modules"
+      ${lndir}/bin/lndir -silent -ignorelinks ${nodeModules} "$absSourceRoot/node_modules"
     '';
   in stdenv.mkDerivation ( {
     nativeBuildInputs = ( attrs.nativeBuildInputs or [] ) ++ [jq];
