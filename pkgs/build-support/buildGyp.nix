@@ -93,6 +93,14 @@
       mkdir -p "$node_modules_path"
       lndir -silent -ignorelinks ${nodeModules} "$node_modules_path"
     '';
+    cloneNm = ''
+      source "$cloneNodeModulesPath"
+    '';
+    isMkNmDir = nodeModules ? passthru.nmBuildCmd;
+    nmCmd = if dontLinkModules then null else
+            if isMkNmDir then cloneNm else
+            if copyNodeModules then copyNm else linkNm;
+
   in stdenv.mkDerivation ( {
     inherit name version src;
     outputs = ["out" "build"];
@@ -113,10 +121,11 @@
         echo "absSourceRoot: $absSourceRoot does not exist" >&2
         exit 1
       fi
-    '' + ( lib.optionalString ( ! dontLinkModules ) ''
       export node_modules_path="$absSourceRoot/node_modules"
+    '' + ( lib.optionalString ( ! dontLinkModules ) ''
 
-      ${nodeModules.buildCommand or ( if copyNodeModules then copyNm else linkNm )}
+      ${nmCmd}
+
       if test -d "$node_modules_path"; then
         chmod -R +rw "$node_modules_path"
       fi
@@ -161,7 +170,10 @@
       mv -- "$absSourceRoot" "$out"
     '';
     passthru = { inherit src nodejs nodeModules; };
-  } // mkDrvAttrs );
+  } // ( lib.optionalAttrs isMkNmDir {
+    inherit (nodeModules.passthru) nmBuildCmd;
+    passAsFile = ["nmBuildCmd"];
+  } ) // mkDrvAttrs );
 
 
 /* -------------------------------------------------------------------------- */

@@ -59,7 +59,7 @@
   , dontLinkModules ? nodeModules == null
   , ...
   } @ attrs: let
-    mkDrvArgs = removeAttrs attrs [
+    mkDrvAttrs = removeAttrs attrs [
       "ident"
       "nodejs"
       "jq"
@@ -80,6 +80,14 @@
       mkdir -p "$node_modules_path"
       lndir -silent -ignorelinks ${nodeModules} "$node_modules_path"
     '';
+    cloneNm = ''
+      source "$nmBuildCmdPath"
+    '';
+    isMkNmDir = nodeModules ? passthru.nmBuildCmd;
+    nmCmd = if dontLinkModules then null else
+            if isMkNmDir then cloneNm else
+            if copyNodeModules then copyNm else linkNm;
+
   in stdenv.mkDerivation ( {
     nativeBuildInputs = ( attrs.nativeBuildInputs or [] ) ++ [
       jq
@@ -95,10 +103,11 @@
         echo "absSourceRoot: $absSourceRoot does not exist" >&2
         exit 1
       fi
-    '' + ( lib.optionalString ( ! dontLinkModules ) ''
       export node_modules_path="$absSourceRoot/node_modules"
+    '' + ( lib.optionalString ( ! dontLinkModules ) ''
 
-      ${nodeModules.buildCommand or ( if copyNodeModules then copyNm else linkNm )}
+      ${nmCmd}
+
       if test -d "$node_modules_path"; then
         chmod -R +rw "$node_modules_path"
       fi
@@ -118,7 +127,10 @@
       mv -- "$absSourceRoot" "$out"
     '';
     passthru = ( attrs.passthru or {} ) // { inherit src nodejs nodeModules; };
-  } // mkDrvArgs );
+  } // ( lib.optionalAttrs isMkNmDir {
+    inherit (nodeModules.passthru) nmBuildCmd;
+    passAsFile = ["nmBuildCmd"];
+  } ) // mkDrvAttrs );
 
     # XXX: Certain `postInstall' scripts might actually need to be
     # `setupHook's because they sometimes try to poke around the top level

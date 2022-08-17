@@ -369,10 +369,12 @@
   , jq          ? __pscope.__pscope.jq or __pscope.__pscope.__pscope.jq
   , lndir       ? __pscope.__pscope.lndir or __pscope.__pscope.__pscope.lndir
   , stdenv      ? __pscope.__pscope.stdenv or __pscope.__pscope.__pscope.stdenv
+  , copyOut      ? __pscope.__pscope.copyOut or __pscope.__pscope.__pscope.copyOut
   , __pscope
   , hasPrepare  ? meta.hasPrepare or false
   , hasBin      ? meta.hasBin or false
   , binPermsSet ? meta.binPermsSet or false
+  , forceDrv    ? true
   , ...
   } @ attrs: let
     prepared = evalScripts ( {
@@ -385,12 +387,11 @@
       "simple" "__pscope" "installed" "built" "source" "nodeModulesDir"
       "evalScripts" "hasPrepare" "hasBin" "binPermsSet"
     ] ) );
-    passthru = { inherit src prepared; } // ( prepared.passthru or {} );
     preparedByScript =
-      prepared // { inherit passthru; } // ( lib.optionalAttrs ( ! simple ) {
+      prepared // ( lib.optionalAttrs ( ! simple ) {
         meta = meta // ( lib.optionalAttrs hasBin { binPermsSet = true; } );
       } );
-    preparedWithBin = stdenv.mkDerivation {
+    preparedWithBin = ( stdenv.mkDerivation {
       inherit src name ident version meta;
       buildInputs = [nodejs];
       dontPatch = true;
@@ -400,9 +401,14 @@
         cp -pr --reflink=auto -- "." "$out"
       '';
       postInstall = genSetBinPermissionsHook { inherit meta; };
-    };
+    } ) // ( lib.optionalAttrs ( ! simple ) {
+      meta = meta // { binPermsSet = true; };
+    } );
+    forceDrv = ( copyOut { inherit name src; } ) //
+               ( lib.optionalAttrs ( ! simple ) { inherit meta; } );
   in if hasPrepare then preparedByScript else
-     if hasBin && ( ! binPermsSet ) then preparedWithBin else src;
+     if hasBin && ( ! binPermsSet ) then preparedWithBin else
+     if ( src ? drvAttrs ) then src else forceDrv;
 
   extendEntWithPrepared = ent: ent.__extend ( final: prev: {
     prepared = final.__apply prepareEnt {};
