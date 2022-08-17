@@ -23,7 +23,7 @@
   # Your scripts will run in a `stdenv' environment with `nodejs' and `jq'
   # available ( in addition to the `node_modules/.bin' scripts ).
   # Additional inputs may be passed in using `nativeBuildInputs', `buildInputs',
-  # etc - but note that `jq' and `nodejs' are appended to `nativeBuildInputs';
+  # etc - but note that `jq' and `nodejs' are appended to `[native]BuildInputs';
   # so you don't have to worry about headaches there.
   # ( AFAIK you can still wipe them out with an `overlay' ).
   #
@@ -49,6 +49,7 @@
   # honestly I never seen a `postInstall' that didn't call `node'.
   , nodejs ? globalAttrs.nodejs or ( throw "You must pass nodejs explicitly" )
   , jq     ? globalAttrs.jq  or ( throw "You must pass jq explicitly" )
+  , lndir  ? globalAttrs.lndir  or ( throw "You must pass lndir explicitly" )
   # Scripts to be run during `builPhase'.
   # These are executed in the order they appear, and may appear multiple times.
   , runScripts ? ["preinstall" "install" "postinstall"]
@@ -68,6 +69,7 @@
       "copyNodeModules"
       "runScripts"
       "nativeBuildInputs"  # We extend this
+      "buildInputs"  # We extend this
       "passthru"           # We extend this
     ];
     # FIXME: The `.bin/' dirs probably point to executables in the Nix store,
@@ -87,11 +89,13 @@
       chmod -R u+rw "$absSourceRoot/node_modules"
     '';
     linkNm = ''
-      ln -s -- ${nodeModules} "$absSourceRoot/node_modules"
+      mkdir -p "$absSourceRoot/node_modules"
+      ${lndir}/bin/lndir -silent ${nodeModules} "$absSourceRoot/node_modules"
     '';
   in stdenv.mkDerivation ( {
-    nativeBuildInputs = ( attrs.nativeBuildInputs or [] ) ++ [jq] ++
-                        ( lib.optional ( nodejs != null ) nodejs );
+    nativeBuildInputs = ( attrs.nativeBuildInputs or [] ) ++ [jq];
+    buildInputs = ( attrs.buildInputs or [] ) ++
+                  ( lib.optional ( nodejs != null ) nodejs );
     # FIXME: handle bundled deps properly
     postUnpack = ''
       export absSourceRoot="$PWD/$sourceRoot"

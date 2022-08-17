@@ -55,7 +55,7 @@
 
   buildGyp = import ./build-support/buildGyp.nix {
     inherit lib nodejs;
-    inherit (pkgs) stdenv xcbuild jq;
+    inherit (pkgs) stdenv xcbuild jq pkg-config;
   };
 
   _mkNodeTarball = import ./build-support/mkNodeTarball.nix {
@@ -77,6 +77,7 @@
   evalScripts = import ./build-support/evalScripts.nix {
     inherit lib nodejs;
     inherit (pkgs) stdenv jq;
+    inherit (pkgs.xorg) lndir;
   };
 
   runInstallScripts = args: let
@@ -94,8 +95,9 @@
 
   _node-pkg-set = import ./node-pkg-set.nix {
     inherit lib evalScripts buildGyp nodejs linkModules genericInstall runBuild;
-    inherit untarSanPerms copyOut;
+    inherit untarSanPerms copyOut patch-shebangs;
     inherit (pkgs) stdenv jq xcbuild linkFarm;
+    inherit (pkgs.xorg) lndir;
     inherit (_mkNodeTarball) packNodeTarballAsIs;
     fetcher = _fetcher.fetcher {
       cwd = throw "Override `cwd' to use local fetchers";  # defer to call-site
@@ -107,11 +109,13 @@
   genericInstall = import ./build-support/genericInstall.nix {
     inherit lib buildGyp evalScripts nodejs;
     inherit (pkgs) stdenv jq xcbuild;
+    inherit (pkgs.xorg) lndir;
   };
 
   runBuild = import ./build-support/runBuild.nix {
     inherit lib evalScripts nodejs;
     inherit (pkgs) stdenv jq;
+    inherit (pkgs.xorg) lndir;
   };
 
 in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {

@@ -12,7 +12,9 @@
 , xcbuild
 , nodejs
 , jq
+, lndir
 , packNodeTarballAsIs
+, patch-shebangs
 , ...
 } @ globalAttrs: let
 
@@ -76,6 +78,7 @@
           genericInstall
           evalScripts
           copyOut
+          lndir
         ;
       };
       addCore = prev: core // ( builtins.intersectAttrs core prev );
@@ -263,11 +266,12 @@
   , nodejs    ? __pscope.__pscope.nodejs or __pscope.__pscope.__pscope.nodejs
   , jq        ? __pscope.__pscope.jq or __pscope.__pscope.__pscope.jq
   , stdenv    ? __pscope.__pscope.stdenv or __pscope.__pscope.__pscope.stdenv
+  , lndir     ? __pscope.__pscope.lndir or __pscope.__pscope.__pscope.lndir
   , __pscope
   , ...
   } @ attrs: let
     built = runBuild ( {
-      inherit src name ident version meta nodejs jq stdenv;
+      inherit src name ident version meta nodejs jq stdenv lndir;
       nodeModules = nodeModulesDir-dev;
     } // ( removeAttrs attrs [
       "simple" "__pscope" "source" "nodeModulesDir-dev" "runBuild"
@@ -314,11 +318,14 @@
   , jq      ? __pscope.__pscope.jq or __pscope.__pscope.__pscope.jq
   , stdenv  ? __pscope.__pscope.stdenv or __pscope.__pscope.__pscope.stdenv
   , xcbuild ? __pscope.__pscope.xcbuild or __pscope.__pscope.__pscope.xcbuild
+  , lndir   ? __pscope.__pscope.lndir or __pscope.__pscope.__pscope.lndir
+  , pkg-config ? __pscope.__pscope.pkg-config or
+                 __pscope.__pscope.__pscope.pkg-config
   , __pscope
   , ...
   } @ attrs: let
     installed = genericInstall ( {
-      inherit src name ident version meta nodejs jq stdenv xcbuild;
+      inherit src name ident version meta nodejs jq stdenv xcbuild lndir;
       nodeModules = nodeModulesDir;
     } // ( removeAttrs attrs [
       "simple" "__pscope" "built" "source" "nodeModulesDir" "genericInstall"
@@ -360,6 +367,7 @@
                   __pscope.__pscope.__pscope.evalScripts
   , nodejs      ? __pscope.__pscope.nodejs or __pscope.__pscope.__pscope.nodejs
   , jq          ? __pscope.__pscope.jq or __pscope.__pscope.__pscope.jq
+  , lndir       ? __pscope.__pscope.lndir or __pscope.__pscope.__pscope.lndir
   , __pscope
   , hasPrepare  ? meta.hasPrepare or false
   , hasBin      ? meta.hasBin or false
@@ -367,7 +375,7 @@
   , ...
   } @ attrs: let
     prepared = evalScripts ( {
-      inherit src name ident version meta nodejs jq stdenv;
+      inherit src name ident version meta nodejs jq stdenv lndir;
       nodeModules = nodeModulesDir;
       runScripts = ["preprepare" "prepare" "postprepare"];
     } // ( lib.optionalAttrs ( hasBin && ( ! binPermsSet ) ) {
@@ -503,14 +511,21 @@
 
 /* -------------------------------------------------------------------------- */
 
-  genSetBinPermissionsHook = { meta, relDir ? "$out", ... }: let
+  genSetBinPermissionsHook = {
+    meta
+  , relDir            ? "$out"
+  , dontPatchShebangs ? false
+  , ...
+  }: let
     from = let m = builtins.match "(.*)/" relDir; in
             if m == null then relDir else m;
     binPaths = map ( p: "${from}/${p}" ) ( builtins.attrValues meta.bin );
     targets =
       if meta.bin ? __DIR__ then "${from}/${meta.bin.__DIR__}/*" else
       builtins.concatStringsSep " " binPaths;
-  in "chmod +x ${targets}";
+  in "chmod +x ${targets}\n" + ( lib.optionalString ( ! dontPatchShebangs ) ''
+    ${patch-shebangs}/bin/patch-shebangs -- ${targets}
+  '' );
 
 
 /* -------------------------------------------------------------------------- */

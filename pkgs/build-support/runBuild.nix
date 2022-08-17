@@ -3,6 +3,8 @@
 , stdenv
 , nodejs
 , jq
+, lndir
+, ...
 } @ globalAttrs: let
 
   runBuild = {
@@ -13,6 +15,7 @@
   , meta              ? {}
   , nodejs            ? globalAttrs.nodejs
   , jq                ? globalAttrs.jq
+  , lndir             ? globalAttrs.lndir
   , stdenv            ? globalAttrs.stdenv
   , buildInputs       ? []
   , nativeBuildInputs ? []  # `nodejs' and `jq' are added unconditionally
@@ -23,7 +26,7 @@
   } @ args: let
     evalScriptArgs = removeAttrs args ["runScripts runPrePublish"];
   in evalScripts ( {
-    inherit name src version nodejs jq nodeModules;
+    inherit name src version nodejs jq lndir nodeModules;
     inherit buildInputs nativeBuildInputs;
     # Both `dependencies' and `devDependencies' are available for this step.
     # NOTE: `devDependencies' are NOT available during the `install'/`prepare'

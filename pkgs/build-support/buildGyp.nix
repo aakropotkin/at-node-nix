@@ -2,6 +2,7 @@
 { lib
 , stdenv
 , xcbuild /* for darwin */
+, pkg-config
 # NOTE: You aren't required to pass these, but they serve as fallbacks.
 # I have commented them out to prevent accidental variable shadowing; but it is
 # recommended that you pass them.
@@ -45,6 +46,8 @@
   # honestly I never seen a `postInstall' that didn't call `node'.
   , nodejs ? globalAttrs.nodejs or ( throw "You must pass nodejs explicitly" )
   , jq     ? globalAttrs.jq  or ( throw "You must pass jq explicitly" )
+  , lndir  ? globalAttrs.lndir  or ( throw "You must pass lndir explicitly" )
+  , pkg-config  ? globalAttrs.pkg-config  or ( throw "You must pass pkg-config explicitly" )
   , node-gyp        ? nodejs.pkgs.node-gyp
   , python          ? nodejs.python  # python3 in most cases.
   , buildType       ? "Release"
@@ -68,6 +71,7 @@
       "dontLinkModules"
       "copyNodeModules"
       "nativeBuildInputs"  # We extend this
+      "buildInputs"  # We extend this
       "passthru"           # We extend this
       "buildType"
       "gypFlags"
@@ -96,17 +100,22 @@
       chmod -R u+rw "$absSourceRoot/node_modules"
     '';
     linkNm = ''
-      ln -s -- ${nodeModules} "$absSourceRoot/node_modules"
+      mkdir -p "$absSourceRoot/node_modules"
+      ${lndir}/bin/lndir -silent ${nodeModules} "$absSourceRoot/node_modules"
     '';
+      #ln -s -- ${nodeModules} "$absSourceRoot/node_modules"
   in stdenv.mkDerivation ( {
     inherit name version src;
     outputs = ["out" "build"];
-    nativeBuildInputs = ( attrs.nativeBuildInputs or [] ) ++ [
+    buildInputs = ( attrs.buildInputs or [] ) ++ [
       nodejs
       node-gyp
+    ];
+    nativeBuildInputs = ( attrs.nativeBuildInputs or [] ) ++ [
       python
       jq
-    ] ++ ( lib.optional stdenv.isDarwin xcbuild );
+    ] ++ ( lib.optional stdenv.isDarwin xcbuild )
+      ++ ( lib.optional stdenv.isLinux pkg-config );
     # FIXME: handle bundled deps properly
     postUnpack = ''
       export absSourceRoot="$PWD/$sourceRoot"

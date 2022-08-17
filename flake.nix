@@ -68,6 +68,7 @@
       } ( prev.config or {} );
       inherit (prev.xorg) lndir;
       inherit (pkgs) pacote copyOut linkToPath untar tar untarSanPerms;
+      inherit (pkgs) pkg-config;
       inherit (callPackages ./pkgs/tools/floco/pacote.nix {})
         pacotecli
         pacote-manifest
@@ -146,7 +147,8 @@
       # FIXME: this interface for handling `nodejs' input is hideous
       buildGyp = import ./pkgs/build-support/buildGyp.nix {
         inherit lib;
-        inherit (nixpkgs.legacyPackages.${system}) stdenv xcbuild jq;
+        inherit (nixpkgs.legacyPackages.${system}) stdenv xcbuild jq pkg-config;
+        inherit (nixpkgs.legacyPackages.${system}.xorg) lndir;
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
       };
 
@@ -154,16 +156,18 @@
       evalScripts = import ./pkgs/build-support/evalScripts.nix {
         inherit lib;
         inherit (nixpkgs.legacyPackages.${system}) stdenv jq;
+        inherit (nixpkgs.legacyPackages.${system}.xorg) lndir;
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
       };
 
       # FIXME: this interface for handling `nodejs' input is hideous
       _node-pkg-set = import ./pkgs/node-pkg-set.nix {
         inherit lib evalScripts buildGyp linkModules genericInstall;
-        inherit runBuild;
+        inherit runBuild patch-shebangs;
         inherit (_mkNodeTarball) packNodeTarballAsIs;
         inherit (nixpkgs.legacyPackages.${system}) stdenv jq xcbuild linkFarm;
         inherit (ak-nix.trivial.${system}) untarSanPerms copyOut;
+        inherit (nixpkgs.legacyPackages.${system}.xorg) lndir;
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
         fetcher = _fetcher.fetcher {
           cwd = throw "Override `cwd' to use local fetchers";  # defer to call-site
@@ -181,6 +185,7 @@
         inherit lib buildGyp evalScripts;
         inherit (nixpkgs.legacyPackages.${system}) stdenv jq xcbuild;
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
+        inherit (nixpkgs.legacyPackages.${system}.xorg) lndir;
       };
 
       # FIXME: this interface for handling `nodejs' input is hideous
@@ -188,12 +193,13 @@
         inherit lib evalScripts;
         inherit (nixpkgs.legacyPackages.${system}) stdenv jq;
         nodejs = nixpkgs.legacyPackages.${system}.nodejs-14_x;
+        inherit (nixpkgs.legacyPackages.${system}.xorg) lndir;
       };
-
-    in {
 
       patch-shebangs = nixpkgs.legacyPackages.${system}.callPackage
                          ./pkgs/build-support/patch-shebangs.nix {};
+
+    in {
 
       pacotecli = _pacotecli system;
       inherit
@@ -203,6 +209,7 @@
         evalScripts
         genericInstall
         runBuild
+        patch-shebangs
       ;
 
       inherit (_mkNodeTarball)

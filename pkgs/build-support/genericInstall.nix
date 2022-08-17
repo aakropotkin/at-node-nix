@@ -2,7 +2,9 @@
 , buildGyp
 , evalScripts
 , stdenv
+, lndir
 , xcbuild
+, pkg-config
 # Impure mode allows IFD to be used to determine if a `binding.gyp' file exists
 # in a source tree.
 # Disable this if you care about purity.
@@ -33,12 +35,14 @@ let
   , impure      ? ga-impure  # See note at top
   # If you ACTUALLY want to avoid this you can explicitly set to `null' but
   # honestly I never seen a `postInstall' that didn't call `node'.
-  , nodejs   ? globalAttrs.nodejs or ( throw "You must pass nodejs explicitly" )
-  , jq       ? globalAttrs.jq  or ( throw "You must pass jq explicitly" )
-  , stdenv   ? globalAttrs.stdenv
-  , xcbuild  ? globalAttrs.xcbuild
-  , node-gyp ? nodejs.pkgs.node-gyp
-  , python   ? nodejs.python
+  , nodejs     ? globalAttrs.nodejs or ( throw "You must pass nodejs explicitly" )
+  , jq         ? globalAttrs.jq or ( throw "You must pass jq explicitly" )
+  , pkg-config ? globalAttrs.pkg-config or ( throw "You must pass pkg-config explicitly" )
+  , stdenv     ? globalAttrs.stdenv or ( throw "You must pass stdenv explicitly" )
+  , lndir      ? globalAttrs.lndir or ( throw "You must pass lndir explicitly" )
+  , xcbuild    ? globalAttrs.xcbuild or ( throw "You must pass xcbuild explicitly" )
+  , node-gyp   ? nodejs.pkgs.node-gyp or ( throw "You must pass node-gyp explicitly" )
+  , python     ? nodejs.python or ( throw "You must pass python explicitly" )
   # XXX: Any flags accepted by either `evalScripts' or `buildGyp' are permitted
   # here and will be passed through to the underlying builders.
   , ...
@@ -48,11 +52,14 @@ let
     # hide the `binding.gyp' file in a subdirectory - because `npmjs.org'
     # does not detect these and will not contain correct `gypfile' fields in
     # registry manifests.
-    gyp =
-      buildGyp ( { inherit name version nodejs jq xcbuild stdenv ; } // args );
+    gyp = buildGyp ( {
+      inherit name version nodejs jq xcbuild stdenv lndir nodeModules;
+      inherit pkg-config;
+    } // args );
     # Plain old install scripts.
-    std =
-      evalScripts ( { inherit name version nodejs jq nodeModules; } // args );
+    std = evalScripts ( {
+      inherit name version nodejs jq lndir nodeModules;
+    } // args );
     # Add node-gyp "just in case" and check dynamically.
     # This is just to avoid IFD but you should add an overlay with hints
     # to avoid using this builder.
@@ -61,12 +68,15 @@ let
         fallback = "// \":\"";
       in ''eval "$( jq -r '.scripts.${sn} ${fallback}' ./package.json; )"'';
     in evalScripts ( {
-      inherit name src version nodejs jq nodeModules;
+      inherit name src version nodejs jq nodeModules lndir pkg-config;
       # `nodejs' and `jq' are added by `evalScripts'
-      nativeBuildInputs = [
-        nodejs.pkgs.node-gyp
-        nodejs.python
-      ] ++ ( lib.optional stdenv.isDarwin xcbuild );
+      nativeBuildInputs = ( args.nativeBuildInputs or [] ) ++ [
+        python
+      ] ++ ( lib.optional stdenv.isDarwin xcbuild )
+        ++ ( lib.optional stdenv.isLinux pkg-config );
+      buildInputs = ( args.buildInputs or [] ) ++ [
+        node-gyp
+      ];
       buildType = "Release";
       configurePhase = let
         hasInstJqCmd = "'.scripts.install // false'";
