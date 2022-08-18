@@ -95,16 +95,7 @@
       ;
       inherit (callPackages ./pkgs/build-support/fetcher.nix {
         impure = final.config.flocoConfig.enableImpureFetchers;
-      })
-        plock2TbFetchArgs
-        plock2GitFetchArgs
-        plock2LinkFetchArgs
-        plock2PathFetchArgs
-        plock2EntryFetchArgs    # This is the router.
-        defaultFetchers
-        getPreferredFetchers
-        fetcher
-      ;
+      }) defaultFetchers getPreferredFetchers fetcher;
       yml2json = callPackage ./pkgs/build-support/yml-to-json.nix {};
       yarnLock = callPackage ./pkgs/build-support/yarn-lock.nix {};
       genFlakeInputs =
@@ -126,11 +117,7 @@
 
       _fetcher = import ./pkgs/build-support/fetcher.nix {
         inherit lib;
-        inherit (nixpkgs.legacyPackages.${system})
-          fetchurl
-          fetchgit
-          fetchzip
-        ;
+        inherit (nixpkgs.legacyPackages.${system}) fetchurl fetchgit fetchzip;
       };
 
       snapDerivation = import ./pkgs/make-derivation-simple.nix {
@@ -222,16 +209,7 @@
         mkNodeTarball
       ;
 
-      inherit (_fetcher)
-        plock2TbFetchArgs
-        plock2GitFetchArgs
-        plock2LinkFetchArgs
-        plock2PathFetchArgs
-        plock2EntryFetchArgs    # This is the router.
-        defaultFetchers
-        getPreferredFetchers
-        fetcher
-      ;
+      inherit (_fetcher) defaultFetchers getPreferredFetchers fetcher;
 
       yml2json = import ./pkgs/build-support/yml-to-json.nix {
         inherit (nixpkgs.legacyPackages.${system}) yq runCommandNoCC;

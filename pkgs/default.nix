@@ -150,16 +150,7 @@ in ( pkgs.extend ak-nix.overlays.default ).extend ( final: prev: {
     linkAsGlobal
     mkNodeTarball
   ;
-  inherit (_fetcher)
-    plock2TbFetchArgs
-    plock2GitFetchArgs
-    plock2LinkFetchArgs
-    plock2PathFetchArgs
-    plock2EntryFetchArgs    # This is the router.
-    defaultFetchers
-    getPreferredFetchers
-    fetcher
-  ;
+  inherit (_fetcher) defaultFetchers getPreferredFetchers fetcher;
 
   # FIXME: Later on, cherry pick _node-pkg-set exports.
 } // _node-pkg-set )

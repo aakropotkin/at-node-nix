@@ -80,9 +80,7 @@
       metaSetPartitionSimple
     ;
 
-    inherit (final.libfetch)
-      typeOfEntry
-    ;
+    inherit (final.libfetch) typeOfEntry fetcherForType plockEntryHashAttr;
 
     inherit (final.__libmeta-pl2)
       metaEntFromPlockV2
