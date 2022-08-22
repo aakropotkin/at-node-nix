@@ -1,7 +1,6 @@
 { lib }: let
 
-
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
   # Metadata must be "flat" plain old data.
   # No derivations, no store paths, no string contexts.
@@ -42,7 +41,7 @@
   # in "impure" builds without poisoning the cache.
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
   # `__serial' is a functor attached to attrsets which produces a reduced
   # attrset of fields which may be written to disk.
@@ -91,8 +90,8 @@
   #      attrset values in an object ( see `serialDefault' `keepAttrs' ).
 
   extInfoExtras = [
-    "__update" "__add" "__extend" "__apply" "__serial" "__entries" "__unfix__"
-    "__updateEx" "__extendEx" "__new"
+    "__update" "__add" "__extend" "__serial" "__entries" "__unfix__"
+    "__updateEx" "__extendEx" "__new" "__thunkWith" "__thunksWith"
   ];
   # The simplest type of serializer.
   serialAsIs   = self: removeAttrs self ( extInfoExtras ++ ["passthru"] );
@@ -132,7 +131,16 @@
   in lib.filterAttrs ( _: v: v != "__DROP__" ) serialized;
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
+
+  # Coerce arg to be a recursive attrset.
+  # Arg must be either a recursive or non-recursive attrset.
+  asRecur = x: if builtins.isFunction x then x else
+    assert builtins.isAttrs x;
+    ( self: x );
+
+
+# ---------------------------------------------------------------------------- #
 
   # Make an extensible attrset with functors `__extend', `__entries', and
   # `__serial', etc which are intended to create a common interface for handling
@@ -163,15 +171,50 @@
   # `__add' is similar to `__update' except it will not overwrite defined fields,
   # this is useful for bulk adding info while avoiding redundancy in evals.
   #
-  # `__apply' passes fields from our attrset as arguments to a function which
-  # accepts an attrset of named fields as its argument.
+  # `__thunkWith' passes fields from our attrset as arguments to a function
+  # which accepts an attrset of named fields as its argument.
   # This is literally just `callPackageWith' and is provided for convenience,
   # this does not modify our attrset in any way.
+  # The argument to `__thunkWith' must be a function which accepts an attrset as
+  # its argument.
+  # The result will be a "thunk" which holds unapplied args and the orginal
+  # function as fields in an attrset.
+  # The function will be applied when an additional attrset of arguments is
+  # given; the entries of the `metaExt' will be updated with these args, and
+  # applied to the stashed function.
+  # The resulting return value will be extended with the fields `override' and
+  # maybe `overrideDerivation' ( for derivations only ) which allow users to
+  # re-evaluate the thunk with modified args.
+  # I strongly suggest reading the Nixpkgs' manual about "overrides" and
+  # `callPackage[s][With]' for more info.
+  #
+  # `__thunksWith' is just an alias for `callPackagesWith'.
+  # This one should be used on "functions that return functions/drvs".
+  # The arg to `__thunksWith' must be a function which takes a single attrset as
+  # as arg which returns an attrset of functions.
+  # The difference is the `override*' fields are added to members of the
+  # returned attrset rather than the return value itself.
+  # This is likely what you want to use on a file full of helper routines; for
+  # example you would evaluate THIS file ( `meta.nix' ) as:
+  #   ( mkExtInfo' {} {
+  #     inherit ( import <nixpkgs> {} ) lib;
+  #   } ).__thunksWith ./meta.nix {}
+  # NOTE: this example is just to show the usage; but because this file only
+  #       takes a single arg this example is pretty contrived.
   #
   # `__unfix__' holds the original argument `info' as a recursively defined
   # attrset ( see `infoR' definition ) which is useful for "deep" overrides.
   # It's unlikely that you'll ever use this yourself, but it's a life saver
   # for deeply nested/complex overrides - so it's here as an escape hatch.
+  # For clarity, this exists so that you can reorder or "unapply" overlays.
+  # As an example imagine that you have a "pipeline" of ( uncomposed ) overlays
+  # that are applied by a routine, and lets say the user wants to replace one of
+  # those overlays with an alternative implementation; they're going to
+  # accomplish this by doing `( myExt.__new myExt.__unfix__ ).__extend ov' to
+  # "undo" the last overlay, and apply an alternative.
+  # TRIVIA: In early versions of Nixpkgs a stack of overlays was stashed so you
+  # could push/pop and insert overlays in a similar fashion ( this was
+  # deprecated later in favor of modules ).
   #
   # `__updateEx' recreates our attrset providing the opportunity to add
   # additional "extra" fields.
@@ -191,26 +234,28 @@
       removeAttrs self ( extInfoExtras ++ ( builtins.attrNames extra ) )
   , ...
   } @ extra: info: let
-    infoR = if builtins.isFunction info then info else ( final: info );
-    self = ( infoR self ) // {
-      __update   = info': self.__new ( self // info' );
-      __add      = info': self.__new ( info' // self );
-      __extend   = ov: self.__new ( lib.fixedPoints.extends ov self.__unfix__ );
-      __serial   = __serial self;
-      __entries  = __entries self;
-      __unfix__  = infoR;
-      __updateEx = extra': mkExtInfo' ( extra // extra' ) self;
-      __extendEx = extraR: mkExtInfo' ( extraR extra ) self;
-      __new      = mkExtInfo' extra;
-      __apply =
-        lib.callPackageWith ( self.__entries // { __pscope = self; } );
-    } // ( builtins.mapAttrs ( _: fn: fn self ) extra );
+    infoR = asRecur info;
+    self = ( infoR self ) // ( {
+      __update    = info': self.__new ( self // info' );
+      __add       = info': self.__new ( info' // self );
+      __extend    = g: self.__new ( lib.fixedPoints.extends g self.__unfix__ );
+      __serial    = __serial self;
+      __entries   = __entries self;
+      __unfix__   = infoR;
+      __updateEx  = extra': mkExtInfo' ( extra // extra' ) self;
+      __extendEx  = extraR: mkExtInfo' ( extraR extra ) self;
+      __new       = mkExtInfo' extra;
+      __thunkWith = lib.callPackageWith self.__entries;
+      # Use this for functions which return other functions or drvs.
+      # It yields a `callPackages' equivalent.
+      __thunksWith = lib.callPackagesWith self.__entries;
+    } // ( builtins.mapAttrs ( _: fn: fn self ) extra ) );
   in self;
 
   mkExtInfo = mkExtInfo' {};
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
   entryFromTypes = [
     "package.json"
@@ -226,7 +271,7 @@
   ];
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
   # Extensible core `meta' info for Node.js packages.
   # This aims to gather and organize information from various sources such as
@@ -276,6 +321,7 @@
       names = {
         __serial = false;
         bname = baseNameOf prev.ident;
+        scopeDir = if final.scoped then "${dirOf prev.ident}/" else "";
         node2nix =
           ( if final.scoped then "_at_${final.names.scope}_slash_" else "" ) +
           "${final.names.bname}-${prev.version}";
@@ -283,6 +329,7 @@
         localTarball =
           ( if final.scoped then "${final.names.scope}-" else "" ) +
           final.names.registryTarball;
+        genName   = cat: "${final.names.bname}-${cat}-${prev.version}";
         tarball   = final.names.registryTarball;
         src       = "${final.names.bname}-source-${prev.version}";
         built     = "${final.names.bname}-built-${prev.version}";
@@ -297,9 +344,16 @@
   in em.__extend addNames;
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
-  keysAsAttrs = __entriesFn: self: let
+  # Convert package "keys" ( "@foo/bar/1.0.0" ) to attrsets as:
+  #   foo = { bar = { v1_0_0 = { ... }; }; };
+  # Keys are grouped by scope, name, and the final version field holds the
+  # original keys' values.
+  # XXX: Please do not use this in any routines; it was written exclusively for
+  # convenience when `nix repl' is being used to avoid having to quote fields
+  # and allow <TAB> autocompletion to behave as expected.
+  unkeyAttrs = __entriesFn: self: let
     inherit (builtins) groupBy attrValues mapAttrs replaceStrings head;
     mapVals = fn: mapAttrs ( _: fn );
     getScope = x: x.scope or x.names.scope or x.meta.names.scope or "_";
@@ -311,25 +365,35 @@
   in vs;
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
   # XXX: Must be a regular `attrset' not a recursive one.
   mkMetaSet = members: let
     membersR = self: members // {
       __meta = ( members.__meta or {} ) // { __serial = false; };
     };
-    extra = let
+    extras = let
       __entries = self:
-        removeAttrs self ( extInfoExtras ++ ["__meta" "__pscope" "__unkey"] );
+        removeAttrs self ( extInfoExtras ++ [
+          "__meta" "__pscope" "__unkey" "__mapEnts"
+        ] );
     in {
       inherit __entries;
-      __new = self: lib.libmeta.mkExtInfo' extra;
-      __unkey = keysAsAttrs __entries;
+      __new = self: lib.libmeta.mkExtInfo' extras;
+      __unkey = unkeyAttrs __entries;
+      # Apply a function to all entries.
+      __mapEnts = fn: self.__new ( builtins.mapAttrs fn self.__entries );
+      # Apply function to entry if it exists, otherwise do nothing.
+      # This may seem superfulous but in practice this is an incredibly common
+      # pattern when trying to override meta-data.
+      __maybeApplyEnt = fn: field:
+        if ! ( self.__entries ? ${field} ) then self else
+          self.__update { ${field} = fn self.${field}; };
     };
-  in lib.libmeta.mkExtInfo' extra membersR;
+  in lib.libmeta.mkExtInfo' extras membersR;
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
   # Determines if a package needs any `nodeModulesDir[-dev]' fields.
   # If `hasBuild' is not yet set, we will err on the safe side and assume it
@@ -352,7 +416,7 @@
   };
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
 in {
   inherit
@@ -364,7 +428,7 @@ in {
     mkExtInfo'
     mkExtInfo
     mkMetaCore
-    keysAsAttrs
+    unkeyAttrs
     mkMetaSet
     entryFromTypes
   ;

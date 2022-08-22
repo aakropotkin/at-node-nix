@@ -45,7 +45,7 @@
     extInfoExtras
     mkExtInfo
     mkMetaCore
-    keysAsAttrs
+    unkeyAttrs
     mkMetaSet
   ;
 
@@ -95,7 +95,7 @@
     in {
       inherit __entries;
       __new = self: lib.libmeta.mkExtInfo' extra;
-      __unkey = keysAsAttrs __entries;
+      __unkey = unkeyAttrs __entries;
     };
     membersR = let
       core = { __pscope = makeOuterScope {}; };
@@ -284,11 +284,11 @@
   # XXX: `nodeModulesDir-dev' must be built in this layer overlays either by
   # composition, or by a later override to `built'.`
   extendEntWithBuilt = ent: ent.__extend ( final: prev: {
-    built = final.__apply buildEnt {};
+    built = final.__thunkWith buildEnt {};
   } );
 
   extendEntAddBuilt = ent: ent.__extend ( final: prev: {
-    built = prev.built or ( final.__apply buildEnt {} );
+    built = prev.built or ( final.__thunkWith buildEnt {} );
   } );
 
   extendPkgSetWithBuilds = final: prev: let
@@ -335,11 +335,11 @@
      ( if simple then { inherit passthru; } else { inherit meta passthru; } );
 
   extendEntWithInstalled = ent: ent.__extend ( final: prev: {
-    installed = final.__apply installEnt {};
+    installed = final.__thunkWith installEnt {};
   } );
 
   extendEntAddInstalled = ent: ent.__extend ( final: prev: {
-    installed = prev.installed or ( final.__apply installEnt {} );
+    installed = prev.installed or ( final.__thunkWith installEnt {} );
   } );
 
   extendPkgSetWithInstalls = final: prev: let
@@ -411,11 +411,11 @@
      if ( src ? drvAttrs ) then src else forceDrv;
 
   extendEntWithPrepared = ent: ent.__extend ( final: prev: {
-    prepared = final.__apply prepareEnt {};
+    prepared = final.__thunkWith prepareEnt {};
   } );
 
   extendEntAddPrepared = ent: ent.__extend ( final: prev: {
-    prepared = prev.prepared or ( final.__apply prepareEnt {} );
+    prepared = prev.prepared or ( final.__thunkWith prepareEnt {} );
   } );
 
   extendPkgSetWithPrepares = final: prev:
@@ -459,11 +459,11 @@
   in module.overrideAttrs ( _: { inherit name; } );
 
   extendEntWithModule = ent: ent.__extend ( final: prev: {
-    module = final.__apply modularizeEnt {};
+    module = final.__thunkWith modularizeEnt {};
   } );
 
   extendEntAddModule = ent: ent.__extend ( final: prev: {
-    module = prev.module or ( final.__apply modularizeEnt {} );
+    module = prev.module or ( final.__thunkWith modularizeEnt {} );
   } );
 
   extendPkgSetWithModules = final: prev:
@@ -500,7 +500,7 @@
     isTb = ( prev.meta.entrySubtype == "registry-tarball" ) ||
            ( prev.meta.entrySubtype == "source-tarball" );
   in lib.optionalAttrs isTb {
-      source = final.__apply unpackSafe {};
+      source = final.__thunkWith unpackSafe {};
       meta   = prev.meta.__extend ( _: _: { useSafeUnpack = true; } );
     } );
 
@@ -516,11 +516,11 @@
 
   # Overwrites any existing def
   extendEntWithTarball = ent: ent.__extend ( final: prev: {
-    tarball = final.__apply packNodeTarballAsIs {};
+    tarball = final.__thunkWith packNodeTarballAsIs {};
   } );
 
   extendEntAddTarball = ent: ent.__extend ( final: prev: {
-    tarball = prev.tarball or ( final.__apply packNodeTarballAsIs {} );
+    tarball = prev.tarball or ( final.__thunkWith packNodeTarballAsIs {} );
   } );
 
   extendPkgSetAddTarballs = final: prev:

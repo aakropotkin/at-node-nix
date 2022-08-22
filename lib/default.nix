@@ -74,7 +74,7 @@
       serialDefault
       mkExtInfo
       mkMetaCore
-      keysAsAttrs
+      unkeyAttrs
       mkMetaSet
       metaEntIsSimple
       metaSetPartitionSimple

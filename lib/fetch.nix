@@ -1,23 +1,28 @@
+# ============================================================================ #
+
 { lib }: let
 
-  # Designed for use with `pkgs/build-support/fetcher.nix', but "pure" routines
-  # have been separated here so that they may be available for some `meta*'.
-  # NOTE: `pkgs/build-support/fetcher.nix' is somewhat dated, and came before
-  # the newer `mkExtInfo' patterns, and it lacks certain types of fetchers
-  # related to registry tarballs in the new `nodeScope' patterns.
-  # Those routines are likely due for an overhaul soon, and may be slowly
-  # migrated here to this lib - since they should represent pure interfaces
-  # anyway ( fetcher drv generators are not injected until the very end ).
-
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
+#
+# Designed for use with `pkgs/build-support/fetcher.nix', but "pure" routines
+# have been separated here so that they may be available for some `meta*'.
+# NOTE: `pkgs/build-support/fetcher.nix' is somewhat dated, and came before
+# the newer `mkExtInfo' patterns, and it lacks certain types of fetchers
+# related to registry tarballs in the new `nodeScope' patterns.
+# Those routines are likely due for an overhaul soon, and may be slowly
+# migrated here to this lib - since they should represent pure interfaces
+# anyway ( fetcher drv generators are not injected until the very end ).
+#
+# ---------------------------------------------------------------------------- #
 
   # Symlink: { resolved :: relative path string, link :: bool }
-  #
+  # Path: { resolved :: relative path string }
   # Git ( private and public ):
   #   "resolved": "git+ssh://git@github.com/<owner>/<repo>.git#<rev>",
   #   This URI is consistent regardless of `https://' or other descriptors.
   #   So, if `builtins.match "git\\+.*" entry.resolved != null' you need to run
   #   the `prepare' ( or whatever ) lifecycle scripts.
+  # Tarball: { resolved :: url or path string, integrity :: SHA512-SRI, [sha1] }
   typeOfEntry = entry: let
     isLink  = entry.link or false;
     isGit   = entry ? resolved && ( lib.test "git\\+.*" entry.resolved );
@@ -43,7 +48,7 @@
      throw "(typeOfEntry) Unrecognized entry type: ${builtins.toJSON entry}";
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
   # Given a set of `nodeFetchers' which satisfy the expected interfaces -
   # Return the fetch function for the given `type'
@@ -63,7 +68,7 @@
     throw "(fetcherForType) Unrecognized entry type: ${type}";
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
   # XXX: I'm unsure of whether or not this works with v1 locks.
   plockEntryHashAttr = entry: let
@@ -76,7 +81,7 @@
      if entry ? sha1      then { inherit (entry) sha1; } else {};
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
   # Registry tarball package-lock entry to fetch* arguments
   #
@@ -131,20 +136,7 @@
   in if impure then impureArgs else pureArgs;
 
 
-/* -------------------------------------------------------------------------- */
-
-  # Pacote/NPM check for the following scripts for Git checkouts:
-  #   scripts.build
-  #   scripts.preinstall
-  #   scripts.install
-  #   scripts.postinstall
-  #   scripts.prepack     NOTE: I'm getting conflicting info on this. Maybe difference in NPM versions?
-  #   scripts.prepare
-  # If any are defined, `npm install' is run to get dependencies, then
-  # `pacote' passes the checked out directory to `dirFetcher', to `dirFetcher'
-  # which is the routine that "really" runs the life-cycle scripts.
-  # This is useful to know, because we can follow to same pattern to avoid
-  # redundantly implementing a lifecycle driver for local trees and git repos.
+# ---------------------------------------------------------------------------- #
 
   # Git
   plock2GitFetchArgs' = impure: { resolved, ... } @ entry: let
@@ -165,13 +157,11 @@
     repo     = builtins.elemAt murl 3;
     rev      = builtins.elemAt murl 4;
 
-    #
     # NOTE: If a hostname has a `git@' ( ssh ) prefix, it MUST use a ":", not
     #       "/" to separate the hostname and path.
     #       Nix's `fetchGit' and `fetchTree' do not use a ":" here, so replace
     #       it with "/" - if you don't, you'll get an error:
     #       "make sure you have access rights".
-
     # builtins.fetchGit { url = "git+ssh://git@github.com/lodash/lodash.git#2da024c3b4f9947a48517639de7560457cd4ec6c"; }
     # builtins.fetchTree { type = "git"; url = "git+ssh://git@github.com/lodash/lodash.git#2da024c3b4f9947a48517639de7560457cd4ec6c"; }
     # NOTE: You must provide `type = "git";' for `fetchTree' it doesn't parse
@@ -186,11 +176,6 @@
     };
     bfr = bfg // { type = "git"; };
     prefetched = if ( ! impure ) then {} else fetchTree bfr;
-    # You'll still need a SHA here, Nixpkgs won't use the `rev'.
-    # I tried fooling with encoding/decoding the `rev' - which "in theory" is
-    # related to the repo's checksum; but there's no clear mapping - the
-    # removal of the `.git/' may be causing this; but in any case, we can only
-    # use `nixpkgs.fetchGit' if we prefetch.
     # XXX: Impure
     nfg = {
       inherit rev;
@@ -212,7 +197,7 @@
   in if impure then impureArgs else pureArgs;
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
   # This is the only fetcher that doesn't take the entry itself.
   # You need to pass the "key" ( relative path to directory ) and CWD instead.
@@ -242,7 +227,7 @@
   };
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
   # Symlink Relative ( "dirFetcher" in `pacote' taxonomy )
   # NOTE: This fetcher triggers additional lifecycle routines that are not
@@ -267,7 +252,7 @@
   }: { resolved, ... }: plock2PathFetchArgs { inherit cwd; key = resolved; };
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
   # Returns the appropriate fetcher arg-set given a `plock(V2)' entry.
   plock2EntryFetchArgs' = impure: cwd: key: entry: let
@@ -282,17 +267,33 @@
      throw "(plock2EntryFetchArgs) Unrecognized entry type for: ${key}";
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
 
   # Attempts to guess `impure' setting.
-  plock2TbFetchArgs    = plock2TbFetchArgs' ( builtins ? currentTime );
-  plock2GitFetchArgs   = plock2GitFetchArgs' ( builtins ? currentTime );
-  plock2PathFetchArgs  = plock2PathFetchArgs' ( builtins ? currentTime );
-  plock2LinkFetchArgs  = plock2LinkFetchArgs' ( builtins ? currentTime );
+  plock2TbFetchArgs    = plock2TbFetchArgs'    ( builtins ? currentTime );
+  plock2GitFetchArgs   = plock2GitFetchArgs'   ( builtins ? currentTime );
+  plock2PathFetchArgs  = plock2PathFetchArgs'  ( builtins ? currentTime );
+  plock2LinkFetchArgs  = plock2LinkFetchArgs'  ( builtins ? currentTime );
   plock2EntryFetchArgs = plock2EntryFetchArgs' ( builtins ? currentTime );
 
 
-/* -------------------------------------------------------------------------- */
+# ---------------------------------------------------------------------------- #
+
+  # FIXME: Finish this
+  sourceInfo = members: let
+    extras = {
+      __serial = self: removeAttrs self ( lib.libmeta.extInfoExtras ++ [
+        "fetchArgs" "fromType" "outPath" "_type"
+      ] );
+    };
+  in lib.libmeta.mkExtInfo' extras ( {
+    _type              = "sourceInfo";
+    fromType           = "raw";
+    fetchArgs.__serial = false;
+  } // members );
+
+
+# ---------------------------------------------------------------------------- #
 
 in {
   inherit
@@ -307,3 +308,10 @@ in {
     plock2EntryFetchArgs' plock2EntryFetchArgs
   ;
 }
+
+
+# ---------------------------------------------------------------------------- #
+#
+#
+#
+# ============================================================================ #

@@ -522,8 +522,8 @@ let
       insts = builtins.mapAttrs byPkey need;
       warn =
         "WARNING: Conflicting instances of packages were detected in your lock"
-        + "XXX: Seriously, I know you blow off warnings, this is actually bad "
-        + "and you need to take immediate action.";
+        + "\nXXX: Seriously, I know you blow off warnings, this is actually "
+        + "bad and you need to take immediate action.";
     in if ( insts != {} ) then builtins.trace warn insts else {};
   in renamed // instances; # this clobbers
 
