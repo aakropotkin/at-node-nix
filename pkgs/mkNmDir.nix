@@ -37,8 +37,6 @@
 , patch-shebangs
 }: let
   isEmpty = ( builtins.attrNames tree ) == [];
-  # Helper functions needed by `patchShebangs'.
-  # Taken from `nixpkgs/pkgs/stdenv/generic/setup.sh'
   cargs = builtins.concatStringsSep " " cmdArgs;
 
   haveBin = lib.filterAttrs ( _: v: v.meta.hasBin or false ) tree;
