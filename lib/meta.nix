@@ -394,7 +394,7 @@
       module    = "${names.bname}-module-${version}";
       global    = "${names.bname}-${version}";
     } // ( lib.optionalAttrs scoped { scope = lib.yank "@([^/]+)/.*" ident; } );
-  in { inherit scope names; };
+  in { inherit scoped names; };
 
 
 # ---------------------------------------------------------------------------- #
