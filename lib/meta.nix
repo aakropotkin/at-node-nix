@@ -329,8 +329,9 @@
     _default                = metaEntSerialDefault;
   };
 
-  metaEntSerial = self: metaEntSerialByFromType.${self.entryFromType} or
-                        metaEntSerialByFromType._default;
+  metaEntSerial = { entryFromType ? "_default", ... }:
+    metaEntSerialByFromType.${entryFromType} or
+    metaEntSerialByFromType._default;
 
 
 # ---------------------------------------------------------------------------- #
@@ -450,7 +451,7 @@
                 coreME;
   in withNames;
 
-  mkMetaEnt = mkMetaEnt {};
+  mkMetaEnt = mkMetaEnt' {};
 
 
 # ---------------------------------------------------------------------------- #
@@ -510,7 +511,7 @@
       in lib.fixedPoints.extends addMeta members;
     in if builtins.isFunction members then membersRFromFn else
        assert builtins.isAttrs members;
-       membersRFromFn;
+       membersRFromAS;
     extras = let
       __entries = self: removeAttrs self ( extInfoExtras ++ [
         "__meta" "__pscope" "__unkey" "__mapEnts" "_type"
