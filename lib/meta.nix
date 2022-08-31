@@ -321,7 +321,7 @@
   # Maps `entFromType' to default serializers.
   # Largely these hide additional fields which can be easily inferred using
   # `entFromType`.
-  metaEntSerialsByFromType = {
+  metaEntSerialByFromType = {
     "package-lock.json"     = metaEntPlSerial;
     "package-lock.json(v1)" = metaEntPlSerial;
     "package-lock.json(v2)" = metaEntPlSerial;
