@@ -579,7 +579,7 @@ in {
     metaEntryFromTypes
     metaEntSerialDefault
     metaEntSerial
-    metaEntExtenWithNames
+    metaEntExtendWithNames
     metaEntNames
     mkMetaEntCore
     mkMetaEnt'
