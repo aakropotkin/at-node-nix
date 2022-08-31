@@ -411,9 +411,9 @@
   # are provided, and it will add verious derivation names so that they may be
   # consistent across various types of builders.
   mkMetaEntCore = {
-    key         ? args.ident + "/" + args.version
-  , ident       ? dirOf args.key
-  , version     ? baseNameOf args.key
+    key         ? members.ident + "/" + members.version
+  , ident       ? dirOf members.key
+  , version     ? baseNameOf members.key
   , entFromType ? "raw"
   , ...
   } @ members: mkExtInfo' {
