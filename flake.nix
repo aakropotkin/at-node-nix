@@ -96,34 +96,32 @@
       pkgsFor = import nixpkgs { inherit (final) system; overlays = [
         ak-nix.overlays.default
       ]; };
+      callPackageWith  = autoArgs: lib.callPackageWith  ( final // autoArgs );
+      callPackagesWith = autoArgs: lib.callPackagesWith ( final // autoArgs );
+      callPackage  = callPackageWith {};
+      callPackages = callPackagesWith {};
     in {
 
       lib = import ./lib { lib = pkgsFor.lib; };
 
-      pacotecli = pacotecli final.system;
+      pacotecli      = pacotecli final.system;
+      snapDerivation = callPackage ./pkgs/make-derivation-simple.nix;
 
-      buildGyp = import ./pkgs/build-support/buildGyp.nix {
-        inherit (final) lib;
-        inherit (pkgsFor) stdenv xcbuild jq nodejs;
-      };
+      inherit ( callPackage ./pkgs/mkNmDir/mkNmDirCmd.nix {} )
+        _mkNmDirCopyCmd
+        _mkNmDirLinkCmd
+        _mkNmDirAddBinWithDirCmd
+        _mkNmDirAddBinNoDirsCmd
+        _mkNmDirAddBinCmd
+        mkNmDirCmdWith
+        mkNmDirCopyCmd
+        mkNmDirLinkCmd
+      ;
 
-      evalScripts = import ./pkgs/build-support/evalScripts.nix {
-        inherit (final) lib;
-        inherit (pkgsFor) stdenv jq nodejs;
-      };
-
-      runInstallScripts = args: let
-        installed = final.evalScripts ( {
-          runScripts  = ["preinstall" "install" "postinstall"];
-          skipMissing = true;
-        } // args );
-        warnMsg = "WARNING: " +
-         "attempting to run installation scripts on a package which " +
-         "uses `node-gyp' - you likely want to use `buildGyp' instead.";
-        maybeWarn = x:
-          if ( args.gypfile or args.meta.gypfile or false ) then
-            ( builtins.trace warnMsg x ) else x;
-      in maybeWarn installed;
+      buildGyp       = callPackage ./pkgs/build-support/buildGyp.nix;
+      evalScripts    = callPackage ./pkgs/build-support/evalScripts.nix;
+      genericInstall = callPackage ./pkgs/build-support/genericInstall.nix;
+      runBuild       = callPackage ./pkgs/build-support/runBuild.nix;
 
       inherit ( import ./pkgs/build-support/mkNodeTarball.nix {
         inherit (pkgsFor) linkFarm linkToPath untar tar;
@@ -150,17 +148,6 @@
         };
       };
 
-      genericInstall = import ./pkgs/build-support/genericInstall.nix {
-        inherit (final) lib buildGyp evalScripts nodejs;
-        inherit (pkgsFor) stdenv jq xcbuild;
-      };
-
-      runBuild = import ./pkgs/build-support/runBuild.nix {
-        inherit (final) lib evalScripts nodejs;
-        inherit (pkgsFor) stdenv jq;
-      };
-
-
       inherit ( import ./pkgs/build-support/fetcher.nix {
         inherit (final) lib;
         inherit (pkgsFor) fetchurl fetchgit fetchzip;
@@ -169,25 +156,9 @@
         typeOfEntry
       ;
 
-      yml2json = import ./pkgs/build-support/yml-to-json.nix {
-        inherit (pkgsFor) yq runCommandNoCC;
-      };
-
-      yarnLock = import ./pkgs/build-support/yarn-lock.nix {
-        inherit (pkgsFor) fetchurl yarn writeText;
-        inherit (final) lib yml2json;
-      };
-
-      genFlakeInputs = import ./pkgs/tools/floco/generate-flake-inputs.nix {
-        inherit (pkgsFor) writeText;
-        inherit (final) lib;
+      genFlakeInputs = callPackagesWith {
         enableTraces = false;
-      };
-
-      snapDerivation = import ./pkgs/make-derivation-simple.nix {
-        inherit (pkgsFor) bash coreutils;
-        inherit (final.stdenv) system;
-      };
+      } ./pkgs/tools/floco/generate-flake-inputs.nix;
 
     };
 

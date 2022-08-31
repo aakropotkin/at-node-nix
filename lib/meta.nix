@@ -415,7 +415,8 @@
   , ident       ? dirOf args.key
   , version     ? baseNameOf args.key
   , entFromType ? "raw"
-  } @ args: mkExtInfo' {
+  , ...
+  } @ members: mkExtInfo' {
     __serial  = metaEntSerial;
     # Ignore extra fields, and similar to `__serial' recur `__entries' calls.
     __entries = self: let
@@ -424,13 +425,13 @@
       ] );
       subEnts = _: v: if ( v ? __entries ) then v.__entries else v;
     in builtins.mapAttrs subEnts scrub;
-  } {
+  } ( {
     _type = "metaEnt";
     inherit key ident version entFromType;
     # We don't hard code this in the serializer in case the user actually does
     # want to serialize their `entries', allowing them the ability to override.
     entries.__serial = false;
-  };
+  } // members );
 
 
   # A sane default constructor for creating a package entry.
@@ -440,10 +441,12 @@
     recNames ? false  # Add `names' by extension allowing easy renaming later
   , ...
   } @ opts: members: let
-    core = mkMetaEntCore members;
+    core = { ident = members.ident or members.name; } //
+           ( removeAttrs members ["name"] );
+    coreME = mkMetaEntCore core;
     # Add `names' either as a flat field or recursively.
-    withNames = if recNames then core.__extend metaEntExtendWithNames else
-                core.__add ( metaEntNames core );
+    withNames = if recNames then coreME.__extend metaEntExtendWithNames else
+                mkMetaEntCore ( ( metaEntNames core ) // core );
   in withNames;
 
   mkMetaEnt = mkMetaEnt {};
@@ -522,11 +525,11 @@
       # FIXME: possible hide this behind a conditional for REPL only.
       __unkey = unkeyAttrs __entries;
       # Apply a function to all entries.
-      __mapEnts = fn: self.__new ( builtins.mapAttrs fn self.__entries );
+      __mapEnts = self: fn: self.__new ( builtins.mapAttrs fn self.__entries );
       # Apply function to entry if it exists, otherwise do nothing.
       # This may seem superfulous but in practice this is an incredibly common
       # pattern when trying to override meta-data.
-      __maybeApplyEnt = fn: field:
+      __maybeApplyEnt = self: fn: field:
         if ! ( self.__entries ? ${field} ) then self else
           self.__update { ${field} = fn self.${field}; };
     };
