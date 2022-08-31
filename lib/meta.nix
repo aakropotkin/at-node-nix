@@ -443,7 +443,7 @@
   } @ opts: members: let
     core = { ident = members.ident or members.name; } //
            ( removeAttrs members ["name"] );
-    coreMN = if RecNames then core else ( ( metaEntNames core ) // core );
+    coreMN = if recNames then core else ( ( metaEntNames core ) // core );
     coreME = mkMetaEntCore coreMN;
     # Add `names' either as a flat field or recursively.
     withNames = if recNames then coreME.__extend metaEntExtendWithNames else
