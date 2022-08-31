@@ -329,9 +329,9 @@
     _default                = metaEntSerialDefault;
   };
 
-  metaEntSerial = { entryFromType ? "_default", ... }:
-    metaEntSerialByFromType.${entryFromType} or
-    metaEntSerialByFromType._default;
+  metaEntSerial = { entryFromType ? "_default", ... } @ self:
+    ( metaEntSerialByFromType.${entryFromType} or
+      metaEntSerialByFromType._default ) self;
 
 
 # ---------------------------------------------------------------------------- #
