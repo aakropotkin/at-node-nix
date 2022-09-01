@@ -13,7 +13,7 @@
     # We are just doing a try run here anyway.
     flocoConfig = ( import ./config.nix {
       inherit (globalAttrs) lib;
-    } ).mkFlocoConfig flocoConfig;
+    } ).mkFlocoConfig ( globalAttrs.flocoConfig or {} );
     # Call it recursively this time ( not that it really matters )
     libcfg = callLibs ./config.nix;
 

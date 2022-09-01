@@ -412,12 +412,11 @@
   # are provided, and it will add verious derivation names so that they may be
   # consistent across various types of builders.
   mkMetaEntCore = {
-    key         ? members.ident + "/" + members.version
-  , ident       ? dirOf members.key
-  , version     ? baseNameOf members.key
+    key         ? core.ident + "/" + core.version
+  , ident       ? dirOf core.key
+  , version     ? baseNameOf core.key
   , entFromType ? "raw"
-  , ...
-  } @ members: mkExtInfo' {
+  } @ core: mkExtInfo' {
     __serial  = metaEntSerial;
     # Ignore extra fields, and similar to `__serial' recur `__entries' calls.
     __entries = self: let
@@ -426,30 +425,28 @@
       ] );
       subEnts = _: v: if ( v ? __entries ) then v.__entries else v;
     in builtins.mapAttrs subEnts scrub;
-  } ( {
+  } {
     _type = "metaEnt";
     inherit key ident version entFromType;
     # We don't hard code this in the serializer in case the user actually does
     # want to serialize their `entries', allowing them the ability to override.
     entries.__serial = false;
-  } // members );
+  };
 
 
   # A sane default constructor for creating a package entry.
   # We leave a few configurables available in this form that we hide for the
   # more common `mkMetaEnt' function.
   mkMetaEnt' = {
-    recNames ? false  # Add `names' by extension allowing easy renaming later
-  , ...
-  } @ opts: members: let
-    core = { ident = members.ident or members.name; } //
-           ( removeAttrs members ["name"] );
-    coreMN = if recNames then core else ( ( metaEntNames core ) // core );
-    coreME = mkMetaEntCore coreMN;
-    # Add `names' either as a flat field or recursively.
-    withNames = if recNames then coreME.__extend metaEntExtendWithNames else
-                coreME;
-  in withNames;
+    # Add `names' by extension allowing easy renaming later
+    recNames ? false
+  } @ opts: members: assert builtins.isAttrs members; let
+    args = builtins.intersectAttrs ( lib.functionArgs mkMetaEntCore ) members;
+    core = mkMetaEntCore ( args // { ident = members.ident or members.name; } );
+    adds = ( removeAttrs members ["name"] ) //
+           ( lib.optionalAttrs ( ! recNames ) ( metaEntNames core.__entries) );
+    withAdds = core.__add adds;
+  in if recNames then withAdds.__extend metaEntExtendWithNames else withAdds;
 
   mkMetaEnt = mkMetaEnt' {};
 
