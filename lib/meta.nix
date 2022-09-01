@@ -509,6 +509,7 @@
     extras = let
       __entries = self: removeAttrs self ( extInfoExtras ++ [
         "__meta" "__pscope" "__unkey" "__mapEnts" "_type"
+        "__maybeApplyEnt"
       ] );
     in {
       __serial  = self: removeAttrs ( serialDefault self ) ["_type" "__pscope"];
